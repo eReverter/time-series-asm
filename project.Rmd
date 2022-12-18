@@ -1,0 +1,156 @@
+---
+title: "ASM"
+author: "Enric"
+date: "12/16/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data
+
+Data from 1997 until 2022 of flu c
+```{r}
+ilinet = read.csv("ILINet.csv", header=TRUE, skip=1)
+head(ilinet)
+
+pre.who = read.csv("WHO_NREVSS_Combined_prior_to_2015_16.csv", header=TRUE, skip=1)
+head(pre.who)
+
+who.clinical = read.csv("WHO_NREVSS_Clinical_Labs.csv", header=TRUE, skip=1)
+head(who.clinical)
+
+who.public = read.csv("WHO_NREVSS_Public_Health_Labs.csv", header=TRUE, skip=1)
+head(who.public)
+
+# https://app.powerbi.com/view?r=eyJrIjoiNjViM2Y4NjktMjJmMC00Y2NjLWFmOWQtODQ0NjZkNWM1YzNmIiwidCI6ImY2MTBjMGI3LWJkMjQtNGIzOS04MTBiLTNkYzI4MGFmYjU5MCIsImMiOjh9
+flu.spain = read.csv("spain_flu_1995_2022.csv", header=TRUE)
+head(flu.spain)
+```
+
+Clean the data prior to convert it into a time-series object. Two options: (1) use only data from *origin = sentinel* or (2) all of the sources. It's better to use data posterior to 2013 for data completeness. Some weeks might need imputation, the mean should be a good option.
+```{r}
+library(dplyr)
+library(tidyverse)
+
+from_year = 2014
+data.sentinel = flu.spain %>%
+  filter(ISO_YEAR >= from_year) %>% # Change for considerig more/less years
+  mutate(ISO_WEEK=sprintf("%02d", as.numeric(ISO_WEEK))) %>%
+  mutate(DATE=paste(ISO_YEAR, ISO_WEEK, sep="_")) %>%
+  filter(ORIGIN_SOURCE=="SENTINEL") %>% #  | ORIGIN_SOURCE=="NONSENTINEL") %>%  # Sentinel data is the most reliable
+  group_by(DATE, ISO_WEEK) %>%
+  summarise(INF_ALL=max(INF_ALL)) %>%
+  select(c(DATE, ISO_WEEK, INF_ALL)) %>%
+  arrange(DATE)
+
+# Some weeks from 2015 and 2016 are missing
+table(data.stacked$ISO_WEEK)
+
+# Impute them
+all.dates = data.frame(matrix(ncol=3, nrow=0))
+colnames(all.dates) = c("DATE", "ISO_WEEK", "INF_ALL")
+
+for (y in seq(from_year, 2022)) {
+  for (w in seq(1, 52)) {
+    date = sprintf("%s_%02d", y, w)
+    week = sprintf("%02d", w)
+    data = data.frame(date, week, NA)
+    colnames(data) = c("DATE", "ISO_WEEK", "INF_ALL")
+    all.dates = rbind(all.dates, data)
+  }
+}
+
+data = all.dates %>%
+  left_join(data.sentinel, by="DATE") %>%
+  mutate(INF_ALL=coalesce(INF_ALL.x, INF_ALL.y)) %>%
+  mutate(ISO_WEEK=coalesce(ISO_WEEK.x, ISO_WEEK.y)) %>%
+  select(c("DATE", "ISO_WEEK", "INF_ALL")) %>%
+  column_to_rownames("DATE")
+
+library(ggplot2)
+library(imputeTS)
+data.ts = ts(data$INF_ALL, frequency=52)
+imp = na_seadec(data.ts, algorithm="mean") 
+ggplot_na_imputations(data.ts, imp)
+```
+
+Notice how for the covid season the number of registered influenza drops practically to 0. This might be due to the fact that people were assumed to have covid instead of getting tested because of the hospital saturations.
+
+```{r}
+serie = imp
+boxplot(serie~floor(time(serie)))
+```
+
+For USA data we have the following:
+```{r}
+pre.who.clean = pre.who %>%
+  filter(YEAR > 1997) %>%
+  mutate(DATE=sprintf("%s_%02d", YEAR, WEEK)) %>%
+  mutate(INF_ALL=ceiling(TOTAL.SPECIMENS * PERCENT.POSITIVE / 100)) %>%
+  filter(WEEK < 53) %>%
+  select(c(DATE, WEEK, INF_ALL)) %>%
+  arrange(DATE) # Until 2015_39
+
+table(pre.who.clean$WEEK) # Complete data
+
+who.clincal.clean = who.clinical %>% # From 2015_40 onwards
+  mutate(DATE=sprintf("%s_%02d", YEAR, WEEK)) %>% 
+  mutate(INF_ALL=ceiling(TOTAL.SPECIMENS * PERCENT.POSITIVE / 100)) %>%
+  filter(WEEK < 53) %>%
+  select(c(DATE, WEEK, INF_ALL)) %>%
+  arrange(DATE)
+
+table(who.clincal.clean$WEEK) # Complete data
+
+flu.strains = c("A..2009.H1N1.", "A..H3.", "A..Subtyping.not.Performed.", "B", "BVic", "BYam", "H3N2v")
+who.public.clean = who.public %>%
+  mutate(DATE=sprintf("%s_%02d", YEAR, WEEK)) %>% 
+  mutate(INF_ALL=rowSums(across(all_of(flu.strains)))) %>%
+  filter(WEEK < 53) %>%
+  select(c(DATE, WEEK, INF_ALL)) %>%
+  arrange(DATE)
+
+table(who.public.clean$WEEK) # Complete data
+
+post.who.clean = who.clincal.clean %>%
+  left_join(who.public.clean, by="DATE") %>%
+  mutate(INF_ALL=INF_ALL.x + INF_ALL.y) %>%
+  select(DATE, INF_ALL)
+
+flu.usa = pre.who.clean %>%
+  select(DATE, INF_ALL) %>%
+  bind_rows(post.who.clean) %>%
+  select
+
+sum(is.na(flu.usa))
+
+ggplot(flu.usa, aes(x=DATE, y=INF_ALL, group=1)) +
+  geom_line(color="steelblue") + 
+  geom_point() + 
+  theme_bw() +
+  scale_x_discrete(breaks = flu.usa$DATE[seq(1, length(flu.usa$DATE), by=52)]) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+
+```{r}
+flu.usa.ts = ts(flu.usa$INF_ALL, frequency=52)
+serie = flu.usa.ts
+boxplot(serie~floor(time(serie)))
+```
+
+Once we choose which dataset to use:
+```{r}
+serie = ceiling(imp) # or flu.usa.ts
+
+mserie = matrix(serie, ncol=52, byrow=TRUE)
+m = apply(mserie, 1, mean)
+v = apply(mserie, 1, var)
+plot(v ~ m)
+abline(lm(v ~ m), col=2, lty=3)
+```
+
