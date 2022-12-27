@@ -34,19 +34,15 @@ pre.who.clean = pre.who %>%
   select(c(DATE, WEEK, INF_ALL)) %>%
   arrange(DATE) # Until 2015_39
 
-head(pre.who.clean)
-#table(pre.who.clean$WEEK) # Complete data
-
 who.clinical.clean = who.clinical %>% # From 2015_40 onwards
   mutate(DATE=sprintf("%s_%02d", YEAR, WEEK)) %>% 
   mutate(INF_ALL=ceiling(TOTAL.SPECIMENS * PERCENT.POSITIVE / 100)) %>%
   filter(WEEK < 53) %>%
   select(c(DATE, WEEK, INF_ALL)) %>%
-  arrange(DATE)
-
-head(who.clinical.clean) # Complete data
+  arrange(DATE) 
 
 flu.strains = c("A..2009.H1N1.", "A..H3.", "A..Subtyping.not.Performed.", "B", "BVic", "BYam", "H3N2v")
+
 who.public.clean = who.public %>%
   mutate(DATE=sprintf("%s_%02d", YEAR, WEEK)) %>% 
   mutate(INF_ALL=rowSums(across(all_of(flu.strains)))) %>%
@@ -54,48 +50,49 @@ who.public.clean = who.public %>%
   select(c(DATE, WEEK, INF_ALL)) %>%
   arrange(DATE)
 
-head(who.public.clean) # Complete data
-
-post.who.clean = who.clincal.clean %>%
+post.who.clean = who.clinical.clean %>%
   left_join(who.public.clean, by="DATE") %>%
   mutate(INF_ALL=INF_ALL.x + INF_ALL.y) %>%
   select(DATE, INF_ALL)
 
-head(post.who.clean)
 
 flu.usa = pre.who.clean %>%
   select(DATE, INF_ALL) %>%
-  bind_rows(post.who.clean) %>%
-  mutate(DATE=as.Date(paste(flu.usa$DATE,"1", sep = "_"), '%Y_%U_%w'))
-
-flu.usa
+  bind_rows(post.who.clean)
+  
+#flu.usa.day.dates = flu.usa %>% mutate(DATE=as.Date(paste(flu.usa$DATE,"1", sep = "_"), '%Y_%U_%w'))
 ```
 
 ```{r}
-flu.usa.ts = ts(flu.usa$INF_ALL, start=1998, frequency=52)
+flu.usa.ts = ts(flu.usa$INF_ALL, start=1998, end=2020,frequency=52) #Lets not include covid for first analysis
 serie = flu.usa.ts
 ```
 
 ```{r}
 par(mfrow=c(1,2))
 plot(serie)
-abline(v=1990:2020,col=4,lty=3)
+abline(v=1990:2022,col=4,lty=3)
 plot(log(serie))
-abline(v=1990:2020,col=4,lty=3)
+abline(v=1990:2022,col=4,lty=3)
 ```
+
 ```{r}
 boxplot(serie~floor(time(serie)))
 ```
+
 ```{r}
 boxplot(log(serie+1)~floor(time(serie))) #Do log(x+1) transformation to evade exploding log of zero values. 
 ```
 
 ```{r}
 mserie = matrix(serie, ncol=52, byrow=TRUE)
-m = apply(mserie, 1, mean) #Calculate Mean for each year
-v = apply(mserie, 1, var) #Calculate Variance for each year
-plot(v ~ m)
-abline(lm(v ~ m), col=2, lty=3)
+
+plot(serie)
+serie
+#m = apply(mserie, 1, mean) #Calculate Mean for each year
+#v = apply(mserie, 1, var) #Calculate Variance for each year
+#plot(v ~ m)
+#abline(lm(v ~ m), col=2, lty=3)
 ```
 
 ```{r}
@@ -105,6 +102,7 @@ lnserie <- log(serie + 1)
 ```{r}
 monthplot(lnserie)
 ```
+
 ```{r}
 ts.plot(matrix(lnserie, nrow=52))
 ```
@@ -131,18 +129,46 @@ d1d1d52lnserie <- diff(d1d52lnserie)
 plot(d1d1d52lnserie)
 abline(h=0)
 ```
+
 ```{r}
 var(lnserie)
 var(d52lnserie)
 var(d1d52lnserie)
 var(d1d1d52lnserie)
 ```
+Let's first look for appropriate models for the seasonal part using ACF and PACF (with high lag.max as there are 52 lag in between each seasonal one)
 
 ```{r}
 par(mfrow=c(1,2))
-acf(d1d52lnserie, ylim=c(-1,1), lag.max = 71,col=c(2,rep(1,51)),lwd=2) #What to choose as lag.max??... 
-pacf(d1d52lnserie, ylim=c(-1,1), lag.max = 71,col=c(rep(1,51),2),lwd=2) #Have to go do some Xmass nonesense right now.
-par(mfrow=c(1,1))
+#For Seasonal Part
+acf(d1d52lnserie, ylim=c(-1,1), lag.max = 400,col=c(2,rep(1,51)),lwd=2) 
+pacf(d1d52lnserie, ylim=c(-1,1), lag.max = 400,col=c(rep(1,51),2),lwd=2) 
 ```
+In this case, only the seasonal pattern is looked into. FOUR propositions:
+- ARMA(P = 5, Q = 0)_52
+- ARMA(P = 0, Q = 4)_52
+- ARMA(P = 0, Q = 1)_52
+- ARMA(P = 1, Q = 1)_52 & add parameters later
 
+Now lets look at the Regular part:
+
+```{r}
+par(mfrow=c(1,2))
+#For Regular Part
+acf(d1d52lnserie, ylim=c(-1,1), lag.max = 80,col=c(2,rep(1,51)),lwd=2) 
+pacf(d1d52lnserie, ylim=c(-1,1), lag.max = 80,col=c(rep(1,51),2),lwd=2) 
+```
+Four propositions:
+- ARMA(p=5, q=0)
+- ARMA(p=9, q=0)
+- ARMA(p=0, q=5)
+- ARMA(p=1, q=1) and add parameters
+
+
+Now first for ARIMA(5,1,0)(5,1,0)_52
+
+```{r}
+(mod1 <- arima(lnserie, order=c(5,1,0),
+              seasonal=list(order=c(5,1,0),period = 52), method="CSS"))
+```
 
