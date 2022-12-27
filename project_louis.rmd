@@ -6,6 +6,8 @@ date: '2022-12-25'
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(forecast)
 ```
 
 ## Data
@@ -59,12 +61,17 @@ post.who.clean = who.clinical.clean %>%
 flu.usa = pre.who.clean %>%
   select(DATE, INF_ALL) %>%
   bind_rows(post.who.clean)
-  
+
+idx_end <- which(flu.usa$DATE == "2020_01") #All weeks including this one should be ommitted. This way COVID is not 
+idxs_to_keep <- seq(1, idx_end-1, by=1) # included in the dataset and there are exactly 52 weeks per year. 
+
+flu.usa.final <- flu.usa[idxs_to_keep,]
+
 #flu.usa.day.dates = flu.usa %>% mutate(DATE=as.Date(paste(flu.usa$DATE,"1", sep = "_"), '%Y_%U_%w'))
 ```
 
 ```{r}
-flu.usa.ts = ts(flu.usa$INF_ALL, start=1998, end=2020,frequency=52) #Lets not include covid for first analysis
+flu.usa.ts = ts(flu.usa.final$INF_ALL, start=1998,frequency=52) #Lets not include covid for first analysis
 serie = flu.usa.ts
 ```
 
@@ -89,10 +96,10 @@ mserie = matrix(serie, ncol=52, byrow=TRUE)
 
 plot(serie)
 serie
-#m = apply(mserie, 1, mean) #Calculate Mean for each year
-#v = apply(mserie, 1, var) #Calculate Variance for each year
-#plot(v ~ m)
-#abline(lm(v ~ m), col=2, lty=3)
+m = apply(mserie, 1, mean) #Calculate Mean for each year
+v = apply(mserie, 1, var) #Calculate Variance for each year
+plot(v ~ m)
+abline(lm(v ~ m), col=2, lty=3)
 ```
 
 ```{r}
@@ -160,7 +167,7 @@ pacf(d1d52lnserie, ylim=c(-1,1), lag.max = 80,col=c(rep(1,51),2),lwd=2)
 ```
 Four propositions:
 - ARMA(p=5, q=0)
-- ARMA(p=9, q=0)
+- ARMA(p=10, q=0)
 - ARMA(p=0, q=5)
 - ARMA(p=1, q=1) and add parameters
 
@@ -168,7 +175,47 @@ Four propositions:
 Now first for ARIMA(5,1,0)(5,1,0)_52
 
 ```{r}
-(mod1 <- arima(lnserie, order=c(5,1,0),
-              seasonal=list(order=c(5,1,0),period = 52), method="CSS"))
+# Adapted from https://rstudio-pubs-static.s3.amazonaws.com/616669_ad9d837f805f4e44aec8df5bc6219b7d.html
+d=1
+DD=1
+per=52
+for(p in 1:4){
+  for(q in 1:2){
+    for(P in 0:4){
+      for(Q in 0:2){
+        if(p+d+q+P+DD+Q<=10){
+          try({
+          model<-arima(lnserie, order = c((p),d,(q)), seasonal = list(order=c((P),DD,(Q)), period=per))
+          pval<-Box.test(model$residuals, lag=log(length(model$residuals)))
+          sse<-sum(model$residuals^2)
+          cat(p,d,q,P,DD,Q,per, 'AIC=', model$aic, ' SSE=',sse,' p-VALUE=', pval$p.value,'\n')
+          })
+        }
+      }
+    }
+  }
+}
 ```
+
+```{r}
+model<-arima(lnserie, order = c(4,1,2), seasonal = list(order=c(0,1,1), period=52))
+```
+
+```{r}
+tsdiag(model,gof=150)
+```
+```{r}
+par(mfrow=c(1,2))
+acf(resid(model), ylim=c(-1,1), lag.max = 400,col=c(2,rep(1,11)),lwd=2)
+pacf(resid(model), ylim=c(-1,1), lag.max = 400,col=c(rep(1,11),2),lwd=2)
+```
+
+Two Year Forecast...
+```{r}
+predicted=forecast(model, 104)
+plot(predicted, xlim=c(1997,2022), xlab='Years')
+#lines(ts(tail(lnserie, 52), frequency=52, start=c(20, 4), end=c(21, 3)), col="red")
+```
+
+
 
