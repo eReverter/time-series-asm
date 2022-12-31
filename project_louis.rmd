@@ -12,7 +12,8 @@ library(forecast)
 
 ## Data
 
-Data from 1997 until 2022 of flu. 
+Data from 1997 until 2022 of flu. At least in this first iteration of the project, it is chosen to restrict the data by excluding COVID as this period does not represent typical viral circulation and testing trends. 
+
 pre.who is all combined cases up to 2015-16. who.clinical and who.public represent cases after 2015 with the former counting Clinical Lab positives and the latter counting results of the Public Health Labs. These will later be combined into one. 
 
 ```{r}
@@ -25,21 +26,23 @@ head(who.clinical)
 who.public = read.csv("WHO_NREVSS_Public_Health_Labs.csv", header=TRUE, skip=1)
 head(who.public)
 ```
+## 0) Pre-processing
 
+The pre-processing steps to combine the datasets. Note that the time-series quantity of interest in the amount of positive cases, calculated as the product of the proportion that is positive times the total amount of specimens tested. Moreover, in some years there is a day extra (leap years) sometimes resulting in one extra week present in the dataset (53 instead of 52). In order to have even amount of weeks, it is chosen to always filter out this last week which only represents a single day difference at the worst. 
 
 ```{r}
 pre.who.clean = pre.who %>%
   filter(YEAR > 1997) %>%
   mutate(DATE=sprintf("%s_%02d", YEAR, WEEK)) %>%
   mutate(INF_ALL=ceiling(TOTAL.SPECIMENS * PERCENT.POSITIVE / 100)) %>%
-  filter(WEEK < 53) %>%
+  filter(WEEK < 53) %>% #Filtering out last week for leap years. 
   select(c(DATE, WEEK, INF_ALL)) %>%
   arrange(DATE) # Until 2015_39
 
 who.clinical.clean = who.clinical %>% # From 2015_40 onwards
   mutate(DATE=sprintf("%s_%02d", YEAR, WEEK)) %>% 
   mutate(INF_ALL=ceiling(TOTAL.SPECIMENS * PERCENT.POSITIVE / 100)) %>%
-  filter(WEEK < 53) %>%
+  filter(WEEK < 53) %>% #Filtering out last week for leap years. 
   select(c(DATE, WEEK, INF_ALL)) %>%
   arrange(DATE) 
 
@@ -48,7 +51,7 @@ flu.strains = c("A..2009.H1N1.", "A..H3.", "A..Subtyping.not.Performed.", "B", "
 who.public.clean = who.public %>%
   mutate(DATE=sprintf("%s_%02d", YEAR, WEEK)) %>% 
   mutate(INF_ALL=rowSums(across(all_of(flu.strains)))) %>%
-  filter(WEEK < 53) %>%
+  filter(WEEK < 53) %>% #Filtering out last week for leap years. 
   select(c(DATE, WEEK, INF_ALL)) %>%
   arrange(DATE)
 
@@ -66,74 +69,86 @@ idx_end <- which(flu.usa$DATE == "2020_01") #All weeks including this one should
 idxs_to_keep <- seq(1, idx_end-1, by=1) # included in the dataset and there are exactly 52 weeks per year. 
 
 flu.usa.final <- flu.usa[idxs_to_keep,]
-
-#flu.usa.day.dates = flu.usa %>% mutate(DATE=as.Date(paste(flu.usa$DATE,"1", sep = "_"), '%Y_%U_%w'))
 ```
+
+## 1) Identification
+
+### a) Determine the needed transformations to make the series stationary. Justify the transformations carried out using graphical and numerical results.
 
 ```{r}
 flu.usa.ts = ts(flu.usa.final$INF_ALL, start=1998,frequency=52) #Lets not include covid for first analysis
 serie = flu.usa.ts
 ```
 
+These direct plots clearly show the seasonality of the virus (winter months typically)
+
 ```{r}
 par(mfrow=c(1,2))
 plot(serie)
 abline(v=1990:2022,col=4,lty=3)
-plot(log(serie))
+lnserie <- log(serie + 1) #Log(x+1) instead of log(x) as log(x) generates infinities for zero values.
+plot(lnserie) 
 abline(v=1990:2022,col=4,lty=3)
 ```
 
+A clear rise in variance in later years is visible. A Logarithmic transformation might be necessary. 
+
 ```{r}
-boxplot(serie~floor(time(serie)))
+boxplot(serie~floor(time(serie)), xlab='time (years)')
+```
+This seems to help.
+
+```{r}
+boxplot(lnserie~floor(time(serie)), xlab='time (years)') 
 ```
 
 ```{r}
-boxplot(log(serie+1)~floor(time(serie))) #Do log(x+1) transformation to evade exploding log of zero values. 
-```
+par(mfrow=c(1,2))
 
-```{r}
 mserie = matrix(serie, ncol=52, byrow=TRUE)
 
-plot(serie)
-serie
 m = apply(mserie, 1, mean) #Calculate Mean for each year
 v = apply(mserie, 1, var) #Calculate Variance for each year
-plot(v ~ m)
+plot(v ~ m, xlab='mean', ylab='variance')
 abline(lm(v ~ m), col=2, lty=3)
+
+logmserie = matrix(lnserie, ncol=52, byrow=TRUE)
+
+logm = apply(logmserie, 1, mean) #Calculate Mean for each year
+logv = apply(logmserie, 1, var) #Calculate Variance for each year
+plot(logv ~ logm, xlab='mean (lnserie)', ylab='variance')
+abline(lm(logv ~ logm), col=2, lty=3)
 ```
 
 ```{r}
-lnserie <- log(serie + 1)
+?monthplot
+monthplot(lnserie, xlab='time (weeks)')
 ```
 
 ```{r}
-monthplot(lnserie)
-```
-
-```{r}
-ts.plot(matrix(lnserie, nrow=52))
+ts.plot(matrix(lnserie, nrow=52), ylab='lnserie', xlab='time (weeks)')
 ```
 
 
 ```{r}
 d52lnserie <- diff(lnserie,52)
-plot(d52lnserie)
+plot(d52lnserie, ylab = "seasonal difference lnserie", xlab="Time (years)")
 abline(h=0)
 ```
 
 ```{r}
-monthplot(d52lnserie)
+monthplot(d52lnserie, ylab = "seasonal difference lnserie", xlab="time (weeks)")
 ```
 
 ```{r}
 d1d52lnserie <- diff(d52lnserie)
-plot(d1d52lnserie)
+plot(d1d52lnserie, ylab = "seas. + reg. diff. lnserie", xlab="Time (years)")
 abline(h=0)
 ```
 
 ```{r}
 d1d1d52lnserie <- diff(d1d52lnserie)
-plot(d1d1d52lnserie)
+plot(d1d1d52lnserie, ylab = "seas. + 2 x reg. diff. lnserie", xlab="Time (years)")
 abline(h=0)
 ```
 
@@ -143,6 +158,9 @@ var(d52lnserie)
 var(d1d52lnserie)
 var(d1d1d52lnserie)
 ```
+
+### b) Analyze the ACF and PACFof the stationary series to identify at least two plausible models. Reason about what features of the correlograms you use to identify these models.
+
 Let's first look for appropriate models for the seasonal part using ACF and PACF (with high lag.max as there are 52 lag in between each seasonal one)
 
 ```{r}
@@ -172,18 +190,39 @@ Four propositions:
 - ARMA(p=1, q=1) and add parameters
 
 
-Now first for ARIMA(5,1,0)(5,1,0)_52
+Now lets try all combinations of pure AR(P), MA(Q) & AR(p), MA(q)
 
 ```{r}
 # Adapted from https://rstudio-pubs-static.s3.amazonaws.com/616669_ad9d837f805f4e44aec8df5bc6219b7d.html
 d=1
 DD=1
 per=52
+seasonal=list(c(5,0), c(0,4), c(0,1))
+regular=list(c(5,0), c(10,0), c(0,5))
+for (P_Q in seasonal){
+  P = P_Q[1]
+  Q = P_Q[2]
+  for (p_q in regular){
+    p = p_q[1]
+    q = p_q[2]
+    try({
+          model<-arima(lnserie, order = c((p),d,(q)), seasonal = list(order=c((P),DD,(Q)), period=per))
+          pval<-Box.test(model$residuals, lag=log(length(model$residuals)))
+          sse<-sum(model$residuals^2)
+          cat(p,d,q,P,DD,Q,per, 'AIC=', model$aic, ' SSE=',sse,' p-VALUE=', pval$p.value,'\n')
+          })
+  }
+}
+```
+
+WE SHOULD TRY MORE COMPBINATIONS. NOT FOR ARMA(1,1,1)(1,1,1)_52 AND ADDYING COEFFICIENTS (as second model)! I HAVE NOT COMPLETELY RAN THE CODE BELOW AND SHOULD PROBABLY CHANGE SOME OF IT. CAN YOU DO THIS ENRIC?  
+
+```{r}
 for(p in 1:4){
-  for(q in 1:2){
-    for(P in 0:4){
-      for(Q in 0:2){
-        if(p+d+q+P+DD+Q<=10){
+  for(q in 1:5){
+    for(P in 0:5){
+      for(Q in 0:4){
+        if(p+d+q+P+DD+Q<=14){
           try({
           model<-arima(lnserie, order = c((p),d,(q)), seasonal = list(order=c((P),DD,(Q)), period=per))
           pval<-Box.test(model$residuals, lag=log(length(model$residuals)))
@@ -197,24 +236,168 @@ for(p in 1:4){
 }
 ```
 
+## 2. Estimation
+
+### a) Use R to estimate the identified models
+
+Optimal model for now: p=10 d=1 q=0 P=0 D=1 Q=4. Let's look at it closer and see if all parameters are significantly contributing. 
+
 ```{r}
-model<-arima(lnserie, order = c(4,1,2), seasonal = list(order=c(0,1,1), period=52))
+model<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52))
+```
+
+## 3. Validation
+
+### a) Perform the complete analysis of residuals, justifying all assumptions made.Usethe corresponding tests and graphical results.
+(+ b) Include analysis of the expressions of the AR and MA infinite models, discuss if they are causal
+and/or invertible and report some adequacy measures.)
+
+```{r}
+#################Validation################################# 
+# 
+validation=function(model){
+  s=frequency(get(model$series))
+  resi=model$residuals
+  par(mfrow=c(2,2),mar=c(3,3,3,3))
+  #Residuals plot
+  plot(resi,main="Residuals")
+  abline(h=0)
+  abline(h=c(-3*sd(resi),3*sd(resi)),lty=3,col=4)
+  #Square Root of absolute values of residuals (Homocedasticity)
+  scatter.smooth(sqrt(abs(resi)),main="Square Root of Absolute residuals",
+                 lpars=list(col=2))
+  
+  #Normal plot of residuals
+  qqnorm(resi)
+  qqline(resi,col=2,lwd=2)
+  
+  ##Histogram of residuals with normal curve
+  hist(resi,breaks=20,freq=FALSE)
+  curve(dnorm(x,mean=mean(resi),sd=sd(resi)),col=2,add=T)
+  
+  
+  #ACF & PACF of residuals
+  par(mfrow=c(1,2))
+  acf(resi,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=2)
+  pacf(resi,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=2)
+  par(mfrow=c(1,1))
+  
+  #Ljung-Box p-values
+  par(mar=c(2,2,1,1))
+  tsdiag(model,gof.lag=7*s)
+  cat("\n--------------------------------------------------------------------\n")
+  print(model)
+  
+  #Stationary and Invertible
+  cat("\nModul of AR Characteristic polynomial Roots: ", 
+      Mod(polyroot(c(1,-model$model$phi))),"\n")
+  cat("\nModul of MA Characteristic polynomial Roots: ",
+      Mod(polyroot(c(1,model$model$theta))),"\n")
+  
+  suppressMessages(require(forecast,quietly=TRUE,warn.conflicts=FALSE))
+  plot(model)
+  
+  #Model expressed as an MA infinity (psi-weights)
+  psis=ARMAtoMA(ar=model$model$phi,ma=model$model$theta,lag.max=36)
+  names(psis)=paste("psi",1:36)
+  cat("\nPsi-weights (MA(inf))\n")
+  cat("\n--------------------\n")
+  print(psis[1:24])
+  
+  #Model expressed as an AR infinity (pi-weights)
+  pis=-ARMAtoMA(ar=-model$model$theta,ma=-model$model$phi,lag.max=36)
+  names(pis)=paste("pi",1:36)
+  cat("\nPi-weights (AR(inf))\n")
+  cat("\n--------------------\n")
+  print(pis[1:24])
+   
+  cat("\nDescriptive Statistics for the Residuals\n")
+  cat("\n----------------------------------------\n") 
+  
+  suppressMessages(require(fBasics,quietly=TRUE,warn.conflicts=FALSE))
+  ##Anderson-Darling test
+  print(basicStats(resi))
+  
+  ## Add here complementary tests (use with caution!)
+  ##---------------------------------------------------------
+  cat("\nNormality Tests\n")
+  cat("\n--------------------\n")
+ 
+  ##Shapiro-Wilks Normality test
+  print(shapiro.test(resi))
+
+  suppressMessages(require(nortest,quietly=TRUE,warn.conflicts=FALSE))
+  ##Anderson-Darling test
+  print(ad.test(resi))
+  
+  suppressMessages(require(tseries,quietly=TRUE,warn.conflicts=FALSE))
+  ##Jarque-Bera test
+  print(jarque.bera.test(resi))
+  
+  cat("\nHomoscedasticity Test\n")
+  cat("\n--------------------\n")
+  suppressMessages(require(lmtest,quietly=TRUE,warn.conflicts=FALSE))
+  ##Breusch-Pagan test
+  obs=get(model$series)
+  print(bptest(resi~I(obs-resi)))
+  
+  cat("\nIndependence Tests\n")
+  cat("\n--------------------\n")
+  
+  ##Ljung-Box test
+  cat("\nLjung-Box test\n")
+  print(t(apply(matrix(c(1:4,(1:4)*s)),1,function(el) {
+    te=Box.test(resi,type="Ljung-Box",lag=el)
+    c(lag=(te$parameter),statistic=te$statistic[[1]],p.value=te$p.value)})))
+  
+}
 ```
 
 ```{r}
-tsdiag(model,gof=150)
+validation(model)
 ```
+
+## c) Check the stability of the proposed models and evaluate their capability of prediction, reserving the last 12 observations
+
 ```{r}
-par(mfrow=c(1,2))
-acf(resid(model), ylim=c(-1,1), lag.max = 400,col=c(2,rep(1,11)),lwd=2)
-pacf(resid(model), ylim=c(-1,1), lag.max = 400,col=c(rep(1,11),2),lwd=2)
+
 ```
+
+### d) Select the best model for forecasting.
+
+```{r}
+
+```
+
+## 4. Predictions
+
+### a) Obtain long term forecasts for the twelve months following the last observation available; provide also confidence intervals.
 
 Two Year Forecast...
 ```{r}
 predicted=forecast(model, 104)
 plot(predicted, xlim=c(1997,2022), xlab='Years')
 #lines(ts(tail(lnserie, 52), frequency=52, start=c(20, 4), end=c(21, 3)), col="red")
+```
+
+## 5. Outlier Treatment
+
+### a) First, analyze whether the Calendar Effects are significant.
+
+```{r}
+
+```
+
+### b) For the last selected model, apply the automatic detection of outliers and its treatment. Try to give the interpretation of detected outliers
+
+```{r}
+
+```
+
+### c) Once the series has been linearized, free of calendar and outliers’ effects, perform forecasting. Compare forecasts results for the original series: classical ARIMA vs ARIMA extension (by using the linearized models)
+
+```{r}
+
 ```
 
 
