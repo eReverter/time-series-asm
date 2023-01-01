@@ -215,7 +215,11 @@ for (P_Q in seasonal){
 }
 ```
 
-WE SHOULD TRY MORE COMPBINATIONS. NOT FOR ARMA(1,1,1)(1,1,1)_52 AND ADDYING COEFFICIENTS (as second model)! I HAVE NOT COMPLETELY RAN THE CODE BELOW AND SHOULD PROBABLY CHANGE SOME OF IT. CAN YOU DO THIS ENRIC?  
+MODEL 1: ARMA(10,1,0)(0,1,4)_52 (to be further optimized in Estimation Part)
+
+
+MODEL 2:
+WE SHOULD TRY MORE COMPBINATIONS. NOT FOR ARMA(1,1,1)(1,1,1)_52 AND ADDYING COEFFICIENTS (as second model)! I HAVE NOT COMPLETELY RAN THE CODE BELOW AND SHOULD PROBABLY CHANGE SOME OF IT. THE PARTS I HAVE RAN (including the ones above) I HAVE STORED IN "model_results.txt".  CAN YOU DO THE REST ENRIC?  
 
 ```{r}
 for(p in 1:4){
@@ -244,11 +248,72 @@ Optimal model for now: p=10 d=1 q=0 P=0 D=1 Q=4. Let's look at it closer and see
 
 ```{r}
 model<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52))
+model$aic
+model$coef
+```
+
+```{r}
+cat("\nT-ratios:",round(model$coef/sqrt(diag(model$var.coef)),2))
+cat("\nSignificant?:",abs(model$coef/sqrt(diag(model$var.coef)))>2)
+```
+```{r}
+model_coef_change<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,NA,NA,NA,NA,NA,NA,NA,NA)) #Setting ar6 to 0.
+model_coef_change$aic
+model_coef_change$coef
+cat("\nT-ratios:",round(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)),2))
+cat("\nSignificant?:",abs(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)))>2)
+
+model = model_coef_change
+```
+Lower AIC! Let's try simplifying further. 
+
+```{r}
+model_coef_change<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,NA,NA,NA,NA,NA,0,NA,NA)) #Setting ar6 & sma2 to 0.
+model_coef_change$aic
+model_coef_change$coef
+cat("\nT-ratios:",round(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)),2))
+cat("\nSignificant?:",abs(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)))>2)
+
+model = model_coef_change
+```
+Lower AIC! Let's try simplifying further. 
+
+```{r}
+model_coef_change<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,NA,0,NA,NA,NA,0,NA,NA)) #Setting ar6, ar8 & sma2 to 0.
+model_coef_change$aic
+model_coef_change$coef
+cat("\nT-ratios:",round(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)),2))
+cat("\nSignificant?:",abs(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)))>2)
+
+model = model_coef_change
+```
+Lower AIC! Let's try simplifying further. 
+
+```{r}
+model_coef_change<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,NA,0,NA,NA,NA,0,0,NA)) #Setting ar6, ar8, sma2 & sma3 to 0.
+model_coef_change$aic
+model_coef_change$coef
+cat("\nT-ratios:",round(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)),2))
+cat("\nSignificant?:",abs(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)))>2)
+
+model = model_coef_change
+```
+Lower AIC! Let's try simplifying further. 
+
+```{r}
+model_coef_change<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,0,NA,NA,NA,0,0,NA)) #Setting ar6, ar7, ar8, sma2 & sma3 to 0.
+model_coef_change$aic
+model_coef_change$coef
+cat("\nT-ratios:",round(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)),2))
+cat("\nSignificant?:",abs(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)))>2)
+
+model <- model_coef_change
 ```
 
 ## 3. Validation
 
 ### a) Perform the complete analysis of residuals, justifying all assumptions made.Usethe corresponding tests and graphical results.
+
 (+ b) Include analysis of the expressions of the AR and MA infinite models, discuss if they are causal
 and/or invertible and report some adequacy measures.)
 
@@ -357,11 +422,91 @@ validation=function(model){
 validation(model)
 ```
 
+Residual Analysis: Generally quite good but outliers are present. 
+QQ-plot: heavy-ish tails and outlier. A bit more values in the extremes than expected for normal distribution or outlier(s)?
+
+
 ## c) Check the stability of the proposed models and evaluate their capability of prediction, reserving the last 12 observations
 
 ```{r}
+ultim=time(lnserie)[(length(time(serie))-12)]
+max_time=time(lnserie)[length(time(serie))]
 
+serie2=window(serie,end=ultim)
+lnserie2=log(serie2+1)
+serie1=window(serie,end=max_time) # adds one year
+lnserie1=log(serie1+1)
+
+
+(modA=arima(lnserie1, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,0,NA,NA,NA,0,0,NA))) # whole time series
+(modB=arima(lnserie2, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,0,NA,NA,NA,0,0,NA))) # model without last observations
 ```
+
+```{r}
+pred=predict(modB,n.ahead=12)
+pr<-ts(c(tail(lnserie2,1),pred$pred),start=ultim,freq=52) # point prediction
+se<-ts(c(0,pred$se),start=ultim,freq=52) # standard error
+ts.plot(pr)
+
+#Intervals
+# We must apply the reverse transformation that we have done by taking exp.
+# lower confidence band
+tl<-ts((pr-1.96*se),start=ultim,freq=52) 
+tu<-ts((pr+1.96*se),start=ultim,freq=52) 
+#tl<-ts(exp(pr-1.96*se)-1,start=ultim,freq=52) 
+# upper confidence band
+#tu<-ts(exp(pr+1.96*se)-1,start=ultim,freq=52)
+# prediction
+#pr<-ts(exp(pr)-1,start=ultim,freq=52)
+
+# the black line is the true time series
+# the red line is the prediction
+# the blue lines are the confidence bands for the prediction
+
+ts.plot(lnserie,tl,tu, pr,lty=c(1,2,2,1),col=c(1,4,4,2),type="o", xlim=c(2019, 2020)) #main=paste("Model #ARIMA(",paste(pdq,collapse=","),")(",paste(PDQ,collapse=","),")12",sep=""))
+#abline(v=(ultim[1]-2):(ultim[1]+2),lty=3,col=4)
+```
+
+```{r}
+pred=predict(modB,n.ahead=12)
+pr<-ts(c(tail(lnserie2,1),pred$pred),start=ultim,freq=52) # point prediction
+se<-ts(c(0,pred$se),start=ultim,freq=52) # standard error
+ts.plot(pr)
+
+#Intervals
+# We must apply the reverse transformation that we have done by taking exp.
+# lower confidence band
+tl<-ts(exp(pr-1.96*se)-1,start=ultim,freq=52) 
+# upper confidence band
+tu<-ts(exp(pr+1.96*se)-1,start=ultim,freq=52)
+# prediction
+pr<-ts(exp(pr)-1,start=ultim,freq=52)
+
+# the black line is the true time series
+# the red line is the prediction
+# the blue lines are the confidence bands for the prediction
+
+ts.plot(serie,tl,tu, pr,lty=c(1,2,2,1),col=c(1,4,4,2),type="o", xlim=c(2019, 2020)) #main=paste("Model #ARIMA(",paste(pdq,collapse=","),")(",paste(PDQ,collapse=","),")12",sep=""))
+#abline(v=(ultim[1]-2):(ultim[1]+2),lty=3,col=4)
+```
+
+
+```{r}
+obs=window(serie,start=ultim)
+pr=window(pr,start=ultim)
+#ts(data.frame(LowLim=tl[-1],Predic=pr,UpperLim=tu[-1],Observ=obs,Error=obs-pr,PercentError=(obs-pr)/obs),start=ultim,freq=52)
+mod.RMSE1=sqrt(sum((obs-pr)^2)/12)
+mod.MAE1=sum(abs(obs-pr))/12
+mod.RMSPE1=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE1=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE1,"MAE"=mod.MAE1,"RMSPE"=mod.RMSPE1,"MAPE"=mod.MAPE1)
+
+mCI1=mean(tu-tl)
+
+cat("\nMean Length CI: ",mCI1)
+```
+
 
 ### d) Select the best model for forecasting.
 
@@ -373,9 +518,8 @@ validation(model)
 
 ### a) Obtain long term forecasts for the twelve months following the last observation available; provide also confidence intervals.
 
-Two Year Forecast...
 ```{r}
-predicted=forecast(model, 104)
+predicted=forecast(model, 52)
 plot(predicted, xlim=c(1997,2022), xlab='Years')
 #lines(ts(tail(lnserie, 52), frequency=52, start=c(20, 4), end=c(21, 3)), col="red")
 ```
