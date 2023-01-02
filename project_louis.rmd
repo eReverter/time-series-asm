@@ -411,7 +411,7 @@ validation=function(model){
   
   ##Ljung-Box test
   cat("\nLjung-Box test\n")
-  print(t(apply(matrix(c(1:4,(1:4)*s)),1,function(el) {
+  print(t(apply(matrix(c(1:6,(1:6)*s)),1,function(el) {
     te=Box.test(resi,type="Ljung-Box",lag=el)
     c(lag=(te$parameter),statistic=te$statistic[[1]],p.value=te$p.value)})))
   
