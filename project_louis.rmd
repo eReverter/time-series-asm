@@ -17,7 +17,7 @@ Data from 1997 until 2022 of flu. At least in this first iteration of the projec
 pre.who is all combined cases up to 2015-16. who.clinical and who.public represent cases after 2015 with the former counting Clinical Lab positives and the latter counting results of the Public Health Labs. These will later be combined into one. 
 
 ```{r}
-pre.who = read.csv("WHO_NREVSS_Combined_prior_to_2015_16.csv", header=TRUE, skip=1) 
+pre.who = read.csv("WHO_NREVSS_Combined_prior_to_2015_16.csv", header=TRUE, skip=1)
 head(pre.who)
 
 who.clinical = read.csv("WHO_NREVSS_Clinical_Labs.csv", header=TRUE, skip=1)
@@ -28,7 +28,7 @@ head(who.public)
 ```
 ## 0) Pre-processing
 
-The pre-processing steps to combine the datasets. Note that the time-series quantity of interest in the amount of positive cases, calculated as the product of the proportion that is positive times the total amount of specimens tested. Moreover, in some years there is a day extra (leap years) sometimes resulting in one extra week present in the dataset (53 instead of 52). In order to have even amount of weeks, it is chosen to always filter out this last week which only represents a single day difference at the worst. 
+The pre-processing steps to combine the datasets. Note that the time-series quantity of interest in the amount of positive cases, calculated as the product of the proportion that is positive times the total amount of specimens tested. Moreover, in some years there is a day extra (leap years) sometimes resulting in one extra week present in the dataset (53 instead of 52). In order to have even amount of weeks, it is chosen to always filter out this last week which only represents a single day difference at the worst.
 
 ```{r}
 pre.who.clean = pre.who %>%
@@ -218,14 +218,16 @@ for (P_Q in seasonal){
 MODEL 1: ARMA(10,1,0)(0,1,4)_52 (to be further optimized in Estimation Part)
 
 
-MODEL 2:
-WE SHOULD TRY MORE COMPBINATIONS. NOT FOR ARMA(1,1,1)(1,1,1)_52 AND ADDYING COEFFICIENTS (as second model)! I HAVE NOT COMPLETELY RAN THE CODE BELOW AND SHOULD PROBABLY CHANGE SOME OF IT. THE PARTS I HAVE RAN (including the ones above) I HAVE STORED IN "model_results.txt".  CAN YOU DO THE REST ENRIC?  
+MODEL 2: ARMA(3,1,3)(1,1,1)_52 (to be further optimized in Estimation Part)
 
 ```{r}
-for(p in 1:4){
-  for(q in 1:5){
-    for(P in 0:5){
-      for(Q in 0:4){
+d = 1
+DD = 1
+per = 52
+for(p in 2:3){
+  for(q in 1:3){
+    for(P in 0:2){
+      for(Q in 0:2){
         if(p+d+q+P+DD+Q<=14){
           try({
           model<-arima(lnserie, order = c((p),d,(q)), seasonal = list(order=c((P),DD,(Q)), period=per))
@@ -256,6 +258,7 @@ model$coef
 cat("\nT-ratios:",round(model$coef/sqrt(diag(model$var.coef)),2))
 cat("\nSignificant?:",abs(model$coef/sqrt(diag(model$var.coef)))>2)
 ```
+
 ```{r}
 model_coef_change<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,NA,NA,NA,NA,NA,NA,NA,NA)) #Setting ar6 to 0.
 model_coef_change$aic
@@ -309,6 +312,43 @@ cat("\nSignificant?:",abs(model_coef_change$coef/sqrt(diag(model_coef_change$var
 
 model <- model_coef_change
 ```
+
+Optimal model for now: p=3 d=1 q=3 P=1 D=1 Q=1. Let's look at it closer and see if all parameters are significantly contributing. 
+
+```{r}
+model2<-arima(lnserie, order = c(3,1,3), seasonal = list(order=c(1,1,1), period=52))
+model2$aic
+model2$coef
+```
+
+```{r}
+cat("\nT-ratios:",round(model2$coef/sqrt(diag(model$var.coef)),2))
+cat("\nSignificant?:",abs(model2$coef/sqrt(diag(model$var.coef)))>2)
+```
+
+```{r}
+model2_coef_change<-arima(lnserie, order = c(3,1,3), seasonal = list(order=c(1,1,1), period=52), fixed=c(NA,NA,NA,NA,NA,NA,0,NA)) #Setting ar3 and sar1 to 0.
+model2_coef_change$aic
+model2_coef_change$coef
+cat("\nT-ratios:",round(model2_coef_change$coef/sqrt(diag(model2_coef_change$var.coef)),2))
+cat("\nSignificant?:",abs(model2_coef_change$coef/sqrt(diag(model2_coef_change$var.coef)))>2)
+
+model2 = model2_coef_change
+```
+Similar AIC but simpler model. Continue.
+
+```{r}
+model2_coef_change<-arima(lnserie, order = c(3,1,3), seasonal = list(order=c(1,1,1), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,NA)) #Setting ar3 and sar1 to 0.
+model2_coef_change$aic
+model2_coef_change$coef
+cat("\nT-ratios:",round(model2_coef_change$coef/sqrt(diag(model2_coef_change$var.coef)),2))
+cat("\nSignificant?:",abs(model2_coef_change$coef/sqrt(diag(model2_coef_change$var.coef)))>2)
+
+model2 = model2_coef_change
+```
+Improved AIC and simpler model.
+
+Cannot be further improved.
 
 ## 3. Validation
 
@@ -425,6 +465,11 @@ validation(model)
 Residual Analysis: Generally quite good but outliers are present. 
 QQ-plot: heavy-ish tails and outlier. A bit more values in the extremes than expected for normal distribution or outlier(s)?
 
+```{r}
+validation(model2)
+```
+
+Residual Analysis: 
 
 ## c) Check the stability of the proposed models and evaluate their capability of prediction, reserving the last 12 observations
 
@@ -507,6 +552,42 @@ mCI1=mean(tu-tl)
 cat("\nMean Length CI: ",mCI1)
 ```
 
+For the second model:
+```{r}
+ultim=time(lnserie)[(length(time(serie))-12)]
+max_time=time(lnserie)[length(time(serie))]
+
+serie2=window(serie,end=ultim)
+lnserie2=log(serie2+1)
+serie1=window(serie,end=max_time) # adds one year
+lnserie1=log(serie1+1)
+
+modA=arima(lnserie, order = c(3,1,3), seasonal = list(order=c(1,1,1), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,NA))
+modB=arima(lnserie2, order = c(3,1,3), seasonal = list(order=c(1,1,1), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,NA))
+
+pred=predict(modB,n.ahead=12)
+pr<-ts(c(tail(lnserie2,1),pred$pred),start=ultim,freq=52) # point prediction
+se<-ts(c(0,pred$se),start=ultim,freq=52) # standard error
+ts.plot(pr)
+
+tl<-ts(exp(pr-1.96*se)-1,start=ultim,freq=52) 
+tu<-ts(exp(pr+1.96*se)-1,start=ultim,freq=52)
+pr<-ts(exp(pr)-1,start=ultim,freq=52)
+ts.plot(serie,tl,tu, pr,lty=c(1,2,2,1),col=c(1,4,4,2),type="o", xlim=c(2019, 2020))
+
+obs=window(serie,start=ultim)
+pr=window(pr,start=ultim)
+mod.RMSE1=sqrt(sum((obs-pr)^2)/12)
+mod.MAE1=sum(abs(obs-pr))/12
+mod.RMSPE1=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE1=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE1,"MAE"=mod.MAE1,"RMSPE"=mod.RMSPE1,"MAPE"=mod.MAPE1)
+
+mCI1=mean(tu-tl)
+
+cat("\nMean Length CI: ",mCI1)
+```
 
 ### d) Select the best model for forecasting.
 
@@ -519,7 +600,7 @@ cat("\nMean Length CI: ",mCI1)
 ### a) Obtain long term forecasts for the twelve months following the last observation available; provide also confidence intervals.
 
 ```{r}
-predicted=forecast(model, 52)
+predicted=forecast(model2, 52)
 plot(predicted, xlim=c(1997,2022), xlab='Years')
 #lines(ts(tail(lnserie, 52), frequency=52, start=c(20, 4), end=c(21, 3)), col="red")
 ```
