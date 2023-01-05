@@ -170,10 +170,10 @@ acf(d1d52lnserie, ylim=c(-1,1), lag.max = 400,col=c(2,rep(1,51)),lwd=2)
 pacf(d1d52lnserie, ylim=c(-1,1), lag.max = 400,col=c(rep(1,51),2),lwd=2) 
 ```
 In this case, only the seasonal pattern is looked into. FOUR propositions:
-- ARMA(P = 5, Q = 0)_52
-- ARMA(P = 0, Q = 4)_52
-- ARMA(P = 0, Q = 1)_52
-- ARMA(P = 1, Q = 1)_52 & add parameters later
+- SARMA(P = 5, Q = 0)_52
+- SARMA(P = 0, Q = 4)_52
+- SARMA(P = 0, Q = 1)_52
+- SARMA(P = 1, Q = 1)_52 & add parameters later
 
 Now lets look at the Regular part:
 
@@ -218,28 +218,28 @@ for (P_Q in seasonal){
 MODEL 1: ARMA(10,1,0)(0,1,4)_52 (to be further optimized in Estimation Part)
 
 
-MODEL 2: ARMA(3,1,3)(1,1,1)_52 (to be further optimized in Estimation Part)
+MODEL 2: ARMA(1,1,1)(1,1,1)_52 (to be further optimized in Estimation Part)
 
 ```{r}
-d = 1
-DD = 1
-per = 52
-for(p in 2:3){
-  for(q in 1:3){
-    for(P in 0:2){
-      for(Q in 0:2){
-        if(p+d+q+P+DD+Q<=14){
-          try({
-          model<-arima(lnserie, order = c((p),d,(q)), seasonal = list(order=c((P),DD,(Q)), period=per))
-          pval<-Box.test(model$residuals, lag=log(length(model$residuals)))
-          sse<-sum(model$residuals^2)
-          cat(p,d,q,P,DD,Q,per, 'AIC=', model$aic, ' SSE=',sse,' p-VALUE=', pval$p.value,'\n')
-          })
-        }
-      }
-    }
-  }
-}
+# d = 1
+# DD = 1
+# per = 52
+# for(p in 2:3){
+#   for(q in 1:3){
+#     for(P in 0:2){
+#       for(Q in 0:2){
+#         if(p+d+q+P+DD+Q<=14){
+#           try({
+#           model<-arima(lnserie, order = c((p),d,(q)), seasonal = list(order=c((P),DD,(Q)), period=per))
+#           pval<-Box.test(model$residuals, lag=log(length(model$residuals)))
+#           sse<-sum(model$residuals^2)
+#           cat(p,d,q,P,DD,Q,per, 'AIC=', model$aic, ' SSE=',sse,' p-VALUE=', pval$p.value,'\n')
+#           })
+#         }
+#       }
+#     }
+#   }
+# }
 ```
 
 ## 2. Estimation
@@ -313,21 +313,34 @@ cat("\nSignificant?:",abs(model_coef_change$coef/sqrt(diag(model_coef_change$var
 model <- model_coef_change
 ```
 
-Optimal model for now: p=3 d=1 q=3 P=1 D=1 Q=1. Let's look at it closer and see if all parameters are significantly contributing. 
+Optimal model for now: p=1 d=1 q=1 P=1 D=1 Q=1. Let's look at it closer and see if all parameters are significantly contributing.
 
+
+Check that the intercept is not significant:
 ```{r}
-model2<-arima(lnserie, order = c(3,1,3), seasonal = list(order=c(1,1,1), period=52))
+model2<-arima(d1d52lnserie, order = c(1,0,1), seasonal = list(order=c(1,0,1), period=52))
 model2$aic
 model2$coef
 ```
 
 ```{r}
-cat("\nT-ratios:",round(model2$coef/sqrt(diag(model$var.coef)),2))
-cat("\nSignificant?:",abs(model2$coef/sqrt(diag(model$var.coef)))>2)
+cat("\nT-ratios:",round(model2$coef/sqrt(abs(diag(model2$var.coef))),2))
+cat("\nSignificant?:",abs(model2$coef/sqrt(abs(diag(model2$var.coef))))>2)
 ```
 
+Without the intercept:
 ```{r}
-model2_coef_change<-arima(lnserie, order = c(3,1,3), seasonal = list(order=c(1,1,1), period=52), fixed=c(NA,NA,NA,NA,NA,NA,0,NA)) #Setting ar3 and sar1 to 0.
+model2<-arima(lnserie, order = c(1,1,1), seasonal = list(order=c(1,1,1), period=52))
+model2$aic
+model2$coef
+
+cat("\nT-ratios:",round(model2$coef/sqrt(diag(model2$var.coef)),2))
+cat("\nSignificant?:",abs(model2$coef/sqrt(diag(model2$var.coef)))>2)
+```
+
+Can we remove sar1?
+```{r}
+model2_coef_change<-arima(lnserie, order = c(1,1,1), seasonal = list(order=c(0,1,1), period=52)) #Setting sar1 to 0.
 model2_coef_change$aic
 model2_coef_change$coef
 cat("\nT-ratios:",round(model2_coef_change$coef/sqrt(diag(model2_coef_change$var.coef)),2))
@@ -335,56 +348,78 @@ cat("\nSignificant?:",abs(model2_coef_change$coef/sqrt(diag(model2_coef_change$v
 
 model2 = model2_coef_change
 ```
+
 Similar AIC but simpler model. Continue.
 
 ```{r}
-model2_coef_change<-arima(lnserie, order = c(3,1,3), seasonal = list(order=c(1,1,1), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,NA)) #Setting ar3 and sar1 to 0.
+model2_coef_change<-arima(lnserie, order = c(2,1,1), seasonal = list(order=c(0,1,1), period=52))
 model2_coef_change$aic
 model2_coef_change$coef
+
 cat("\nT-ratios:",round(model2_coef_change$coef/sqrt(diag(model2_coef_change$var.coef)),2))
 cat("\nSignificant?:",abs(model2_coef_change$coef/sqrt(diag(model2_coef_change$var.coef)))>2)
 
 model2 = model2_coef_change
 ```
-Improved AIC and simpler model.
+Improved AIC.
 
-Cannot be further improved.
+Nothing improves the AIC while keeping the model simple anymore. 
+```{r}
+# # model2_coef_change<-arima(lnserie, order = c(3,1,3), seasonal = list(order=c(0,1,1), period=52))
+# model2_coef_change$aic
+# model2_coef_change$coef
+# 
+# cat("\nT-ratios:",round(model2_coef_change$coef/sqrt(diag(model2_coef_change$var.coef)),2))
+# cat("\nSignificant?:",abs(model2_coef_change$coef/sqrt(diag(model2_coef_change$var.coef)))>2)
+# 
+# model2 = model2_coef_change
+```
+
+All the modules of the roots are greater than 1, for which the model is causal and invertible.
+```{r}
+cat("\nModul of AR Characteristic polynomial Roots: ", 
+    Mod(polyroot(c(1,-model2_coef_change$model$phi))),"\n")
+cat("\nModul of MA Characteristic polynomial Roots: ",
+    Mod(polyroot(c(1,model2_coef_change$model$theta))),"\n")
+```
 
 ## 3. Validation
 
 ### a) Perform the complete analysis of residuals, justifying all assumptions made.Usethe corresponding tests and graphical results.
 
-(+ b) Include analysis of the expressions of the AR and MA infinite models, discuss if they are causal
-and/or invertible and report some adequacy measures.)
-
 ```{r}
-#################Validation################################# 
-# 
-validation=function(model){
+#################Validation#################################
+validation=function(model, dades){
   s=frequency(get(model$series))
-  resi=model$residuals
+  resid=model$residuals
   par(mfrow=c(2,2),mar=c(3,3,3,3))
   #Residuals plot
-  plot(resi,main="Residuals")
+  plot(resid,main="Residuals")
   abline(h=0)
-  abline(h=c(-3*sd(resi),3*sd(resi)),lty=3,col=4)
+  abline(h=c(-3*sd(resid),3*sd(resid)),lty=3,col=4)
   #Square Root of absolute values of residuals (Homocedasticity)
-  scatter.smooth(sqrt(abs(resi)),main="Square Root of Absolute residuals",
+  scatter.smooth(sqrt(abs(resid)),main="Square Root of Absolute residuals",
                  lpars=list(col=2))
   
   #Normal plot of residuals
-  qqnorm(resi)
-  qqline(resi,col=2,lwd=2)
+  qqnorm(resid)
+  qqline(resid,col=2,lwd=2)
   
   ##Histogram of residuals with normal curve
-  hist(resi,breaks=20,freq=FALSE)
-  curve(dnorm(x,mean=mean(resi),sd=sd(resi)),col=2,add=T)
+  hist(resid,breaks=20,freq=FALSE)
+  curve(dnorm(x,mean=mean(resid),sd=sd(resid)),col=2,add=T)
   
   
   #ACF & PACF of residuals
   par(mfrow=c(1,2))
-  acf(resi,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=2)
-  pacf(resi,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=2)
+  acf(resid,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=1)
+  pacf(resid,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=1)
+  par(mfrow=c(1,1))
+  
+  #ACF & PACF of square residuals 
+  par(mfrow=c(1,2))
+  acf(resid^2,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=1)
+  pacf(resid^2,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=1)
   par(mfrow=c(1,1))
   
   #Ljung-Box p-values
@@ -399,29 +434,19 @@ validation=function(model){
   cat("\nModul of MA Characteristic polynomial Roots: ",
       Mod(polyroot(c(1,model$model$theta))),"\n")
   
-  suppressMessages(require(forecast,quietly=TRUE,warn.conflicts=FALSE))
-  plot(model)
-  
   #Model expressed as an MA infinity (psi-weights)
   psis=ARMAtoMA(ar=model$model$phi,ma=model$model$theta,lag.max=36)
   names(psis)=paste("psi",1:36)
   cat("\nPsi-weights (MA(inf))\n")
   cat("\n--------------------\n")
-  print(psis[1:24])
+  print(psis[1:20])
   
   #Model expressed as an AR infinity (pi-weights)
   pis=-ARMAtoMA(ar=-model$model$theta,ma=-model$model$phi,lag.max=36)
   names(pis)=paste("pi",1:36)
   cat("\nPi-weights (AR(inf))\n")
   cat("\n--------------------\n")
-  print(pis[1:24])
-   
-  cat("\nDescriptive Statistics for the Residuals\n")
-  cat("\n----------------------------------------\n") 
-  
-  suppressMessages(require(fBasics,quietly=TRUE,warn.conflicts=FALSE))
-  ##Anderson-Darling test
-  print(basicStats(resi))
+  print(pis[1:20])
   
   ## Add here complementary tests (use with caution!)
   ##---------------------------------------------------------
@@ -429,51 +454,90 @@ validation=function(model){
   cat("\n--------------------\n")
  
   ##Shapiro-Wilks Normality test
-  print(shapiro.test(resi))
+  print(shapiro.test(resid(model)))
 
   suppressMessages(require(nortest,quietly=TRUE,warn.conflicts=FALSE))
   ##Anderson-Darling test
-  print(ad.test(resi))
+  print(ad.test(resid(model)))
   
   suppressMessages(require(tseries,quietly=TRUE,warn.conflicts=FALSE))
   ##Jarque-Bera test
-  print(jarque.bera.test(resi))
+  print(jarque.bera.test(resid(model)))
   
   cat("\nHomoscedasticity Test\n")
   cat("\n--------------------\n")
   suppressMessages(require(lmtest,quietly=TRUE,warn.conflicts=FALSE))
   ##Breusch-Pagan test
   obs=get(model$series)
-  print(bptest(resi~I(obs-resi)))
+  print(bptest(resid(model)~I(obs-resid(model))))
   
   cat("\nIndependence Tests\n")
   cat("\n--------------------\n")
   
+  ##Durbin-Watson test
+  print(dwtest(resid(model)~I(1:length(resid(model)))))
+  
   ##Ljung-Box test
   cat("\nLjung-Box test\n")
-  print(t(apply(matrix(c(1:6,(1:6)*s)),1,function(el) {
-    te=Box.test(resi,type="Ljung-Box",lag=el)
+  print(t(apply(matrix(c(1:4,(1:4)*s)),1,function(el) {
+    te=Box.test(resid(model),type="Ljung-Box",lag=el)
     c(lag=(te$parameter),statistic=te$statistic[[1]],p.value=te$p.value)})))
   
+
+  #Sample ACF vs. Teoric ACF
+  par(mfrow=c(2,2),mar=c(3,3,3,3))
+  acf(dades, ylim=c(-1,1) ,lag.max=36,main="Sample ACF")
+  
+  plot(ARMAacf(model$model$phi,model$model$theta,lag.max=36),ylim=c(-1,1), 
+       type="h",xlab="Lag",  ylab="", main="ACF Teoric")
+  abline(h=0)
+  
+  #Sample PACF vs. Teoric PACF
+  pacf(dades, ylim=c(-1,1) ,lag.max=36,main="Sample PACF")
+  
+  plot(ARMAacf(model$model$phi,model$model$theta,lag.max=36, pacf=T),ylim=c(-1,1),
+       type="h", xlab="Lag", ylab="", main="PACF Teoric")
+  abline(h=0)
+  par(mfrow=c(1,1))
 }
+################# Fi Validation #################################
 ```
 
 ```{r}
-validation(model)
+validation(model, d1d1d52lnserie)
 ```
 
 Residual Analysis: Generally quite good but outliers are present. 
 QQ-plot: heavy-ish tails and outlier. A bit more values in the extremes than expected for normal distribution or outlier(s)?
 
+For the second model:
 ```{r}
-validation(model2)
+validation(model2, d1d1d52lnserie)
 ```
 
-Residual Analysis: 
+Residual Analysis:
+
+Residuals seem to have the mean around 0, but some outliers can be identified. Its variance slightly deviates from homogeneity. All statistical tests fail, which might be explain by the presence of outliers.
+
+Some lags are over the confidence bands in the P(ACF) plots, but the Durbin-Watson clearly shows there is no autocorrelation.
+
+The Ljung-Box test fails after lag 51, which is confirmed by the plot and tabulated results. This means that when considered jointly the correlation structure up to lag k=51 is compatible with a WNoise, but fails afterwards.
+
+Invertible and Causal:
+
+The proposed model is found both invertible and causal. 
+
+Invertible: the roots of the regular MA-characteristic polynomial lies outside the unit circle. Thus, the model can be represented as a convergent AR(∞) expression with π-weights (useful for estimating point predictions).
+
+Causal/stationary: the roots of the seasonal AR-characteristic polynomial lie outside the unit circle. Thus, the model can be represented as a convergent MA(∞) expression with ψ-weights(useful for estimating the variance of estimated point predictions).
+
+Sample and theoretical P(ACF) look alike.
 
 ## c) Check the stability of the proposed models and evaluate their capability of prediction, reserving the last 12 observations
 
+For the first model:
 ```{r}
+par(mfrow=c(1,1))
 ultim=time(lnserie)[(length(time(serie))-12)]
 max_time=time(lnserie)[length(time(serie))]
 
@@ -482,64 +546,21 @@ lnserie2=log(serie2+1)
 serie1=window(serie,end=max_time) # adds one year
 lnserie1=log(serie1+1)
 
-
 (modA=arima(lnserie1, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,0,NA,NA,NA,0,0,NA))) # whole time series
 (modB=arima(lnserie2, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,0,NA,NA,NA,0,0,NA))) # model without last observations
-```
 
-```{r}
 pred=predict(modB,n.ahead=12)
 pr<-ts(c(tail(lnserie2,1),pred$pred),start=ultim,freq=52) # point prediction
 se<-ts(c(0,pred$se),start=ultim,freq=52) # standard error
 ts.plot(pr)
 
-#Intervals
-# We must apply the reverse transformation that we have done by taking exp.
-# lower confidence band
-tl<-ts((pr-1.96*se),start=ultim,freq=52) 
-tu<-ts((pr+1.96*se),start=ultim,freq=52) 
-#tl<-ts(exp(pr-1.96*se)-1,start=ultim,freq=52) 
-# upper confidence band
-#tu<-ts(exp(pr+1.96*se)-1,start=ultim,freq=52)
-# prediction
-#pr<-ts(exp(pr)-1,start=ultim,freq=52)
-
-# the black line is the true time series
-# the red line is the prediction
-# the blue lines are the confidence bands for the prediction
-
-ts.plot(lnserie,tl,tu, pr,lty=c(1,2,2,1),col=c(1,4,4,2),type="o", xlim=c(2019, 2020)) #main=paste("Model #ARIMA(",paste(pdq,collapse=","),")(",paste(PDQ,collapse=","),")12",sep=""))
-#abline(v=(ultim[1]-2):(ultim[1]+2),lty=3,col=4)
-```
-
-```{r}
-pred=predict(modB,n.ahead=12)
-pr<-ts(c(tail(lnserie2,1),pred$pred),start=ultim,freq=52) # point prediction
-se<-ts(c(0,pred$se),start=ultim,freq=52) # standard error
-ts.plot(pr)
-
-#Intervals
-# We must apply the reverse transformation that we have done by taking exp.
-# lower confidence band
-tl<-ts(exp(pr-1.96*se)-1,start=ultim,freq=52) 
-# upper confidence band
+tl<-ts(exp(pr-1.96*se)-1,start=ultim,freq=52)
 tu<-ts(exp(pr+1.96*se)-1,start=ultim,freq=52)
-# prediction
 pr<-ts(exp(pr)-1,start=ultim,freq=52)
+ts.plot(serie,tl,tu, pr,lty=c(1,2,2,1),col=c(1,4,4,2),type="o", xlim=c(2017, 2020), ylim=c(0,50000))
 
-# the black line is the true time series
-# the red line is the prediction
-# the blue lines are the confidence bands for the prediction
-
-ts.plot(serie,tl,tu, pr,lty=c(1,2,2,1),col=c(1,4,4,2),type="o", xlim=c(2019, 2020)) #main=paste("Model #ARIMA(",paste(pdq,collapse=","),")(",paste(PDQ,collapse=","),")12",sep=""))
-#abline(v=(ultim[1]-2):(ultim[1]+2),lty=3,col=4)
-```
-
-
-```{r}
 obs=window(serie,start=ultim)
 pr=window(pr,start=ultim)
-#ts(data.frame(LowLim=tl[-1],Predic=pr,UpperLim=tu[-1],Observ=obs,Error=obs-pr,PercentError=(obs-pr)/obs),start=ultim,freq=52)
 mod.RMSE1=sqrt(sum((obs-pr)^2)/12)
 mod.MAE1=sum(abs(obs-pr))/12
 mod.RMSPE1=sqrt(sum(((obs-pr)/obs)^2)/12)
@@ -554,26 +575,20 @@ cat("\nMean Length CI: ",mCI1)
 
 For the second model:
 ```{r}
-ultim=time(lnserie)[(length(time(serie))-12)]
-max_time=time(lnserie)[length(time(serie))]
+par(mfrow=c(1,1))
 
-serie2=window(serie,end=ultim)
-lnserie2=log(serie2+1)
-serie1=window(serie,end=max_time) # adds one year
-lnserie1=log(serie1+1)
-
-modA=arima(lnserie, order = c(3,1,3), seasonal = list(order=c(1,1,1), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,NA))
-modB=arima(lnserie2, order = c(3,1,3), seasonal = list(order=c(1,1,1), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,NA))
+modA=arima(lnserie, order = c(2,1,1), seasonal = list(order=c(0,1,1), period=52))
+modB=arima(lnserie2, order = c(2,1,1), seasonal = list(order=c(0,1,1), period=52))
 
 pred=predict(modB,n.ahead=12)
 pr<-ts(c(tail(lnserie2,1),pred$pred),start=ultim,freq=52) # point prediction
 se<-ts(c(0,pred$se),start=ultim,freq=52) # standard error
 ts.plot(pr)
 
-tl<-ts(exp(pr-1.96*se)-1,start=ultim,freq=52) 
+tl<-ts(exp(pr-1.96*se)-1,start=ultim,freq=52)
 tu<-ts(exp(pr+1.96*se)-1,start=ultim,freq=52)
 pr<-ts(exp(pr)-1,start=ultim,freq=52)
-ts.plot(serie,tl,tu, pr,lty=c(1,2,2,1),col=c(1,4,4,2),type="o", xlim=c(2019, 2020))
+ts.plot(serie,tl,tu, pr,lty=c(1,2,2,1),col=c(1,4,4,2),type="o", xlim=c(2017, 2020), ylim=c(0,50000))
 
 obs=window(serie,start=ultim)
 pr=window(pr,start=ultim)
@@ -586,44 +601,152 @@ data.frame("RMSE"=mod.RMSE1,"MAE"=mod.MAE1,"RMSPE"=mod.RMSPE1,"MAPE"=mod.MAPE1)
 
 mCI1=mean(tu-tl)
 
-cat("\nMean Length CI: ",mCI1)
+cat("\nMean Length CI: ", mCI1)
 ```
 
 ### d) Select the best model for forecasting.
 
-```{r}
-
-```
+Need to first first model as well to check. Look at the RMSE, etc.
 
 ## 4. Predictions
 
 ### a) Obtain long term forecasts for the twelve months following the last observation available; provide also confidence intervals.
 
+The long term predictions look as depicted below. Sadly, it is known that covid struck during this long term forecast, which looks quite different in reality, as shown by the red line. Less influenca cases were recorded since most cases were directly diagnosed as being covid to not saturate hospitals.
 ```{r}
+par(mfrow=c(1,1))
 predicted=forecast(model2, 52)
-plot(predicted, xlim=c(1997,2022), xlab='Years')
-#lines(ts(tail(lnserie, 52), frequency=52, start=c(20, 4), end=c(21, 3)), col="red")
+plot(predicted, xlim=c(2010,2021), xlab='Years')
+
+covid = log(ts(flu.usa$INF_ALL, start=1998, frequency=52) + 1)
+
+lines(window(covid, start=2020), col='red')
 ```
 
 ## 5. Outlier Treatment
 
 ### a) First, analyze whether the Calendar Effects are significant.
 
-```{r}
-
-```
+No need since it has not been covered in class.
 
 ### b) For the last selected model, apply the automatic detection of outliers and its treatment. Try to give the interpretation of detected outliers
 
 ```{r}
+source("atipics2.r")
 
+##Detection of outliers: In this case, we have applied a regular and a seasonal differentiation of order $S=12$. We set the criterion to $crit = 2.8$ and also the argument LS to TRUE.
+## The crit value chosen by the researcher is typically fixed around 3; the LS argument is optional (= TRUE if one aims to detect a level shift)
+
+mod.atip=outdetec(model2,dif=c(1,52), crit=2.9, LS=T) # automatic detection of outliers with crit=2.8 and LS =TRUE
+
+#Estimated residual variance after outliers detection and treatment
+mod.atip$sigma
 ```
+
+```{r}
+atipics=mod.atip$atip[order(mod.atip$atip[,1]),]
+
+weeks = c()
+for (w in seq(1, 52)) {
+  week = sprintf("%02d", w)
+  weeks = append(weeks, week)
+}
+
+data.frame(atipics,Fecha=paste(weeks[(atipics[,1]-1)%%52+1],start(lnserie)[1]+((atipics[,1]-1)%/%52)),perc.Obs=exp(atipics[,3])*100)
+```
+
+```{r}
+lnserie.lin=lineal(lnserie, mod.atip$atip)
+serie.lin=exp(lnserie.lin)
+
+plot(serie.lin,col=2)
+lines(serie)
+```
+
+```{r}
+plot(lnserie-lnserie.lin)
+```
+
+The outliers ...
 
 ### c) Once the series has been linearized, free of calendar and outliers’ effects, perform forecasting. Compare forecasts results for the original series: classical ARIMA vs ARIMA extension (by using the linearized models)
 
 ```{r}
-
+d1d12lnserie.lin=diff(diff(lnserie.lin,52))
+par(mfrow=c(1,2))
+acf(d1d12lnserie.lin,ylim=c(-1,1),lag.max=72,col=c(2,rep(1,51)),lwd=2)
+pacf(d1d12lnserie.lin,ylim=c(-1,1),lag.max=72,col=c(rep(1,51),2),lwd=2)
 ```
+
+```{r}
+par(mfrow=c(1,1))
+```
+
+```{r}
+(mod.lin=arima(lnserie.lin,order=c(2,1,1),seasonal=list(order=c(0,1,1),period=52)))
+```
+
+```{r}
+dades=d1d12lnserie.lin  #stationary
+model=mod.lin  #Fitted ARIMA model to the log-linearized series
+validation(model,dades)
+```
+
+```{r}
+ultim=time(serie.lin)[(length(time(serie))-12)]
+max_time=time(serie.lin)[length(time(serie.lin))]
+pdq=c(2,1,1)
+PDQ=c(0,1,1)
+
+serie1.lin=window(serie.lin,end=max_time)
+lnserie1.lin=log(serie1.lin)
+serie2.lin=window(serie.lin,end=ultim)
+lnserie2.lin=log(serie2.lin)
+
+(mod.lin=arima(lnserie1.lin,order=pdq,seasonal=list(order=PDQ,period=52)))
+(mod2.lin=arima(lnserie2.lin,order=pdq,seasonal=list(order=PDQ,period=52)))
+```
+
+```{r}
+######### Out of sample prediction: reserve 2019 data
+
+pred=predict(mod2.lin,n.ahead=12)
+wLS=sum(mod.atip$atip[mod.atip$atip$type_detected=="LS" & mod.atip$atip$Obs<=length(serie)-52,3])
+predic=pred$pr+wLS
+pr<-ts(c(tail(lnserie2,1),predic),start=ultim,freq=52) #puntual predictions (log-scale) obtained
+se<-ts(c(0,pred$se),start=ultim,freq=52) #Standard errors for puntual predictions
+
+##Prediction Intervals (back transformed to original scale using exp-function)
+tl<-ts(exp(pr-1.96*se),start=ultim,freq=52)
+tu<-ts(exp(pr+1.96*se),start=ultim,freq=52)
+pr<-ts(exp(pr),start=ultim,freq=52)
+
+#Plot of the original airbcn series (thousands) and out-of-sample predictions
+ts.plot(serie,tl,tu,pr,lty=c(1,2,2,1),col=c(1,4,4,2),type="o",main="Model ARIMA(2,1,1)(0,1,1)_52", xlim=c(2017, 2020), ylim=c(0,50000))
+abline(v=(ultim[1]-3):(ultim[1]+2),lty=3,col=4)
+```
+
+```{r}
+(previs.lin=window(cbind(tl,pr,tu,serie,error=round(serie-pr,3)),start=ultim))
+```
+
+```{r}
+obs=window(serie,start=ultim)
+mod.RMSE2=sqrt(sum((obs-pr)^2)/12)
+mod.MAE2=sum(abs(obs-pr))/12
+mod.RMSPE2=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE2=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE2,"MAE"=mod.MAE2,"RMSPE"=mod.RMSPE2,"MAPE"=mod.MAPE2)
+```
+
+```{r}
+mCI2=mean(tu-tl)
+
+cat("\nMean Length CI: ",mCI2)
+```
+
+
 
 
 
