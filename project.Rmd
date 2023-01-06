@@ -1,23 +1,22 @@
 ---
-title: "ASM"
-author: "Enric"
-date: "12/16/2022"
+title: "ASM_project_louis"
 output: html_document
-editor_options: 
-  chunk_output_type: console
+date: '2022-12-25'
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(forecast)
 ```
 
 ## Data
 
-Data from 1997 until 2022 of flu c
-```{r}
-ilinet = read.csv("ILINet.csv", header=TRUE, skip=1)
-head(ilinet)
+Data from 1997 until 2022 of flu. At least in this first iteration of the project, it is chosen to restrict the data by excluding COVID as this period does not represent typical viral circulation and testing trends. 
 
+pre.who is all combined cases up to 2015-16. who.clinical and who.public represent cases after 2015 with the former counting Clinical Lab positives and the latter counting results of the Public Health Labs. These will later be combined into one. 
+
+```{r}
 pre.who = read.csv("WHO_NREVSS_Combined_prior_to_2015_16.csv", header=TRUE, skip=1)
 head(pre.who)
 
@@ -26,131 +25,720 @@ head(who.clinical)
 
 who.public = read.csv("WHO_NREVSS_Public_Health_Labs.csv", header=TRUE, skip=1)
 head(who.public)
-
-# https://app.powerbi.com/view?r=eyJrIjoiNjViM2Y4NjktMjJmMC00Y2NjLWFmOWQtODQ0NjZkNWM1YzNmIiwidCI6ImY2MTBjMGI3LWJkMjQtNGIzOS04MTBiLTNkYzI4MGFmYjU5MCIsImMiOjh9
-flu.spain = read.csv("spain_flu_1995_2022.csv", header=TRUE)
-head(flu.spain)
 ```
+## 0) Pre-processing
 
-Clean the data prior to convert it into a time-series object. Two options: (1) use only data from *origin = sentinel* or (2) all of the sources. It's better to use data posterior to 2013 for data completeness. Some weeks might need imputation, the mean should be a good option.
-```{r}
-library(dplyr)
-library(tidyverse)
+The pre-processing steps to combine the datasets. Note that the time-series quantity of interest in the amount of positive cases, calculated as the product of the proportion that is positive times the total amount of specimens tested. Moreover, in some years there is a day extra (leap years) sometimes resulting in one extra week present in the dataset (53 instead of 52). In order to have even amount of weeks, it is chosen to always filter out this last week which only represents a single day difference at the worst.
 
-from_year = 2014
-data.sentinel = flu.spain %>%
-  filter(ISO_YEAR >= from_year) %>% # Change for considerig more/less years
-  mutate(ISO_WEEK=sprintf("%02d", as.numeric(ISO_WEEK))) %>%
-  mutate(DATE=paste(ISO_YEAR, ISO_WEEK, sep="_")) %>%
-  filter(ORIGIN_SOURCE=="SENTINEL") %>% #  | ORIGIN_SOURCE=="NONSENTINEL") %>%  # Sentinel data is the most reliable
-  group_by(DATE, ISO_WEEK) %>%
-  summarise(INF_ALL=max(INF_ALL)) %>%
-  select(c(DATE, ISO_WEEK, INF_ALL)) %>%
-  arrange(DATE)
-
-# Some weeks from 2015 and 2016 are missing
-table(data.stacked$ISO_WEEK)
-
-# Impute them
-all.dates = data.frame(matrix(ncol=3, nrow=0))
-colnames(all.dates) = c("DATE", "ISO_WEEK", "INF_ALL")
-
-for (y in seq(from_year, 2022)) {
-  for (w in seq(1, 52)) {
-    date = sprintf("%s_%02d", y, w)
-    week = sprintf("%02d", w)
-    data = data.frame(date, week, NA)
-    colnames(data) = c("DATE", "ISO_WEEK", "INF_ALL")
-    all.dates = rbind(all.dates, data)
-  }
-}
-
-data = all.dates %>%
-  left_join(data.sentinel, by="DATE") %>%
-  mutate(INF_ALL=coalesce(INF_ALL.x, INF_ALL.y)) %>%
-  mutate(ISO_WEEK=coalesce(ISO_WEEK.x, ISO_WEEK.y)) %>%
-  select(c("DATE", "ISO_WEEK", "INF_ALL")) %>%
-  column_to_rownames("DATE")
-
-library(ggplot2)
-library(imputeTS)
-data.ts = ts(data$INF_ALL, frequency=52)
-imp = na_seadec(data.ts, algorithm="mean") 
-ggplot_na_imputations(data.ts, imp)
-```
-
-Notice how for the covid season the number of registered influenza drops practically to 0. This might be due to the fact that people were assumed to have covid instead of getting tested because of the hospital saturations.
-
-```{r}
-serie = imp
-boxplot(serie~floor(time(serie)))
-```
-
-For USA data we have the following:
 ```{r}
 pre.who.clean = pre.who %>%
   filter(YEAR > 1997) %>%
   mutate(DATE=sprintf("%s_%02d", YEAR, WEEK)) %>%
   mutate(INF_ALL=ceiling(TOTAL.SPECIMENS * PERCENT.POSITIVE / 100)) %>%
-  filter(WEEK < 53) %>%
+  filter(WEEK < 53) %>% #Filtering out last week for leap years. 
   select(c(DATE, WEEK, INF_ALL)) %>%
   arrange(DATE) # Until 2015_39
 
-table(pre.who.clean$WEEK) # Complete data
-
-who.clincal.clean = who.clinical %>% # From 2015_40 onwards
+who.clinical.clean = who.clinical %>% # From 2015_40 onwards
   mutate(DATE=sprintf("%s_%02d", YEAR, WEEK)) %>% 
   mutate(INF_ALL=ceiling(TOTAL.SPECIMENS * PERCENT.POSITIVE / 100)) %>%
-  filter(WEEK < 53) %>%
+  filter(WEEK < 53) %>% #Filtering out last week for leap years. 
   select(c(DATE, WEEK, INF_ALL)) %>%
-  arrange(DATE)
-
-table(who.clincal.clean$WEEK) # Complete data
+  arrange(DATE) 
 
 flu.strains = c("A..2009.H1N1.", "A..H3.", "A..Subtyping.not.Performed.", "B", "BVic", "BYam", "H3N2v")
+
 who.public.clean = who.public %>%
   mutate(DATE=sprintf("%s_%02d", YEAR, WEEK)) %>% 
   mutate(INF_ALL=rowSums(across(all_of(flu.strains)))) %>%
-  filter(WEEK < 53) %>%
+  filter(WEEK < 53) %>% #Filtering out last week for leap years. 
   select(c(DATE, WEEK, INF_ALL)) %>%
   arrange(DATE)
 
-table(who.public.clean$WEEK) # Complete data
-
-post.who.clean = who.clincal.clean %>%
+post.who.clean = who.clinical.clean %>%
   left_join(who.public.clean, by="DATE") %>%
   mutate(INF_ALL=INF_ALL.x + INF_ALL.y) %>%
   select(DATE, INF_ALL)
 
+
 flu.usa = pre.who.clean %>%
   select(DATE, INF_ALL) %>%
-  bind_rows(post.who.clean) %>%
-  select
+  bind_rows(post.who.clean)
 
-sum(is.na(flu.usa))
+idx_end <- which(flu.usa$DATE == "2020_01") #All weeks including this one should be ommitted. This way COVID is not 
+idxs_to_keep <- seq(1, idx_end-1, by=1) # included in the dataset and there are exactly 52 weeks per year. 
 
-ggplot(flu.usa, aes(x=DATE, y=INF_ALL, group=1)) +
-  geom_line(color="steelblue") + 
-  geom_point() + 
-  theme_bw() +
-  scale_x_discrete(breaks = flu.usa$DATE[seq(1, length(flu.usa$DATE), by=52)]) +
-  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+flu.usa.final <- flu.usa[idxs_to_keep,]
 ```
 
+## 1) Identification
+
+### a) Determine the needed transformations to make the series stationary. Justify the transformations carried out using graphical and numerical results.
+
 ```{r}
-flu.usa.ts = ts(flu.usa$INF_ALL, frequency=52)
+flu.usa.ts = ts(flu.usa.final$INF_ALL, start=1998,frequency=52) #Lets not include covid for first analysis
 serie = flu.usa.ts
-boxplot(serie~floor(time(serie)))
 ```
 
-Once we choose which dataset to use:
+These direct plots clearly show the seasonality of the virus (winter months typically)
+
 ```{r}
-serie = ceiling(imp) # or flu.usa.ts
+par(mfrow=c(1,2))
+plot(serie)
+abline(v=1990:2022,col=4,lty=3)
+lnserie <- log(serie + 1) #Log(x+1) instead of log(x) as log(x) generates infinities for zero values.
+plot(lnserie) 
+abline(v=1990:2022,col=4,lty=3)
+```
+
+A clear rise in variance in later years is visible. A Logarithmic transformation might be necessary. 
+Lambda close to 0, log transformation.
+```{r}
+BoxCox.lambda(serie+1)
+```
+
+```{r}
+boxplot(serie~floor(time(serie)), xlab='time (years)')
+```
+This seems to help.
+
+```{r}
+boxplot(lnserie~floor(time(serie)), xlab='time (years)') 
+```
+
+```{r}
+par(mfrow=c(1,2))
 
 mserie = matrix(serie, ncol=52, byrow=TRUE)
-m = apply(mserie, 1, mean)
-v = apply(mserie, 1, var)
-plot(v ~ m)
+
+m = apply(mserie, 1, mean) #Calculate Mean for each year
+v = apply(mserie, 1, var) #Calculate Variance for each year
+plot(v ~ m, xlab='mean', ylab='variance')
 abline(lm(v ~ m), col=2, lty=3)
+
+logmserie = matrix(lnserie, ncol=52, byrow=TRUE)
+
+logm = apply(logmserie, 1, mean) #Calculate Mean for each year
+logv = apply(logmserie, 1, var) #Calculate Variance for each year
+plot(logv ~ logm, xlab='mean (lnserie)', ylab='variance')
+abline(lm(logv ~ logm), col=2, lty=3)
 ```
+
+```{r}
+?monthplot
+monthplot(lnserie, xlab='time (weeks)')
+```
+
+```{r}
+ts.plot(matrix(lnserie, nrow=52), ylab='lnserie', xlab='time (weeks)')
+```
+
+
+```{r}
+d52lnserie <- diff(lnserie,52)
+plot(d52lnserie, ylab = "seasonal difference lnserie", xlab="Time (years)")
+abline(h=0)
+```
+
+```{r}
+monthplot(d52lnserie, ylab = "seasonal difference lnserie", xlab="time (weeks)")
+```
+
+```{r}
+d1d52lnserie <- diff(d52lnserie)
+plot(d1d52lnserie, ylab = "seas. + reg. diff. lnserie", xlab="Time (years)")
+abline(h=0)
+```
+
+```{r}
+d1d1d52lnserie <- diff(d1d52lnserie)
+plot(d1d1d52lnserie, ylab = "seas. + 2 x reg. diff. lnserie", xlab="Time (years)")
+abline(h=0)
+```
+
+```{r}
+var(lnserie)
+var(d52lnserie)
+var(d1d52lnserie)
+var(d1d1d52lnserie)
+```
+
+### b) Analyze the ACF and PACFof the stationary series to identify at least two plausible models. Reason about what features of the correlograms you use to identify these models.
+
+Let's first look for appropriate models for the seasonal part using ACF and PACF (with high lag.max as there are 52 lag in between each seasonal one)
+
+```{r}
+par(mfrow=c(1,2))
+#For Seasonal Part
+acf(d1d52lnserie, ylim=c(-1,1), lag.max = 400,col=c(2,rep(1,51)),lwd=2) 
+pacf(d1d52lnserie, ylim=c(-1,1), lag.max = 400,col=c(rep(1,51),2),lwd=2) 
+```
+In this case, only the seasonal pattern is looked into. FOUR propositions:
+- SARMA(P = 5, Q = 0)_52
+- SARMA(P = 0, Q = 4)_52
+- SARMA(P = 0, Q = 1)_52
+- SARMA(P = 1, Q = 1)_52 & add parameters later
+
+Now lets look at the Regular part:
+
+```{r}
+par(mfrow=c(1,2))
+#For Regular Part
+acf(d1d52lnserie, ylim=c(-1,1), lag.max = 80,col=c(2,rep(1,51)),lwd=2) 
+pacf(d1d52lnserie, ylim=c(-1,1), lag.max = 80,col=c(rep(1,51),2),lwd=2) 
+```
+Four propositions:
+- ARMA(p=5, q=0)
+- ARMA(p=10, q=0)
+- ARMA(p=0, q=5)
+- ARMA(p=1, q=1) and add parameters
+
+
+Now lets try all combinations of pure AR(P), MA(Q) & AR(p), MA(q)
+
+```{r}
+# Adapted from https://rstudio-pubs-static.s3.amazonaws.com/616669_ad9d837f805f4e44aec8df5bc6219b7d.html
+# d=1
+# DD=1
+# per=52
+# seasonal=list(c(5,0), c(0,4), c(0,1))
+# regular=list(c(5,0), c(10,0), c(0,5))
+# for (P_Q in seasonal){
+#   P = P_Q[1]
+#   Q = P_Q[2]
+#   for (p_q in regular){
+#     p = p_q[1]
+#     q = p_q[2]
+#     try({
+#           model<-arima(lnserie, order = c((p),d,(q)), seasonal = list(order=c((P),DD,(Q)), period=per))
+#           pval<-Box.test(model$residuals, lag=log(length(model$residuals)))
+#           sse<-sum(model$residuals^2)
+#           cat(p,d,q,P,DD,Q,per, 'AIC=', model$aic, ' SSE=',sse,' p-VALUE=', pval$p.value,'\n')
+#           })
+#   }
+# }
+```
+
+MODEL 1: ARMA(10,1,0)(0,1,4)_52 (to be further optimized in Estimation Part)
+
+
+MODEL 2: ARMA(1,1,1)(1,1,1)_52 (to be further optimized in Estimation Part)
+
+```{r}
+# d = 1
+# DD = 1
+# per = 52
+# for(p in 2:3){
+#   for(q in 1:3){
+#     for(P in 0:2){
+#       for(Q in 0:2){
+#         if(p+d+q+P+DD+Q<=14){
+#           try({
+#           model<-arima(lnserie, order = c((p),d,(q)), seasonal = list(order=c((P),DD,(Q)), period=per))
+#           pval<-Box.test(model$residuals, lag=log(length(model$residuals)))
+#           sse<-sum(model$residuals^2)
+#           cat(p,d,q,P,DD,Q,per, 'AIC=', model$aic, ' SSE=',sse,' p-VALUE=', pval$p.value,'\n')
+#           })
+#         }
+#       }
+#     }
+#   }
+# }
+```
+
+## 2. Estimation
+
+### a) Use R to estimate the identified models
+
+Optimal model for now: p=10 d=1 q=0 P=0 D=1 Q=4. Let's look at it closer and see if all parameters are significantly contributing. 
+
+```{r}
+model<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52))
+model$aic
+model$coef
+```
+
+```{r}
+cat("\nT-ratios:",round(model$coef/sqrt(diag(model$var.coef)),2))
+cat("\nSignificant?:",abs(model$coef/sqrt(diag(model$var.coef)))>2)
+```
+
+```{r}
+model_coef_change<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,NA,NA,NA,NA,NA,NA,NA,NA)) #Setting ar6 to 0.
+model_coef_change$aic
+model_coef_change$coef
+cat("\nT-ratios:",round(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)),2))
+cat("\nSignificant?:",abs(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)))>2)
+
+model = model_coef_change
+```
+Lower AIC! Let's try simplifying further. 
+
+```{r}
+model_coef_change<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,NA,NA,NA,NA,NA,0,NA,NA)) #Setting ar6 & sma2 to 0.
+model_coef_change$aic
+model_coef_change$coef
+cat("\nT-ratios:",round(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)),2))
+cat("\nSignificant?:",abs(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)))>2)
+
+model = model_coef_change
+```
+Lower AIC! Let's try simplifying further. 
+
+```{r}
+model_coef_change<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,NA,0,NA,NA,NA,0,NA,NA)) #Setting ar6, ar8 & sma2 to 0.
+model_coef_change$aic
+model_coef_change$coef
+cat("\nT-ratios:",round(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)),2))
+cat("\nSignificant?:",abs(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)))>2)
+
+model = model_coef_change
+```
+Lower AIC! Let's try simplifying further. 
+
+```{r}
+model_coef_change<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,NA,0,NA,NA,NA,0,0,NA)) #Setting ar6, ar8, sma2 & sma3 to 0.
+model_coef_change$aic
+model_coef_change$coef
+cat("\nT-ratios:",round(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)),2))
+cat("\nSignificant?:",abs(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)))>2)
+
+model = model_coef_change
+```
+Lower AIC! Let's try simplifying further. 
+
+```{r}
+model_coef_change<-arima(lnserie, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,0,NA,NA,NA,0,0,NA)) #Setting ar6, ar7, ar8, sma2 & sma3 to 0.
+model_coef_change$aic
+model_coef_change$coef
+cat("\nT-ratios:",round(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)),2))
+cat("\nSignificant?:",abs(model_coef_change$coef/sqrt(diag(model_coef_change$var.coef)))>2)
+
+model <- model_coef_change
+```
+
+Optimal model for now: p=2 d=1 q=1 P=1 D=1 Q=1. Let's look at it closer and see if all parameters are significantly contributing.
+
+
+Check that the intercept is not significant:
+```{r}
+model2<-arima(d1d52lnserie, order = c(2,0,1), seasonal = list(order=c(1,0,1), period=52))
+model2$aic
+model2$coef
+```
+
+```{r}
+cat("\nT-ratios:",round(model2$coef/sqrt(abs(diag(model2$var.coef))),2))
+cat("\nSignificant?:",abs(model2$coef/sqrt(abs(diag(model2$var.coef))))>2)
+```
+
+Without the intercept:
+```{r}
+model2<-arima(lnserie, order = c(3,1,3), seasonal = list(order=c(1,1,2), period=52))
+model2$aic
+model2$coef
+
+cat("\nT-ratios:",round(model2$coef/sqrt(diag(model2$var.coef)),2))
+cat("\nSignificant?:",abs(model2$coef/sqrt(diag(model2$var.coef)))>2)
+```
+
+Can we remove sar1?
+```{r}
+model2_coef_change<-arima(lnserie, order = c(2,1,1), seasonal = list(order=c(0,1,1), period=52)) #Setting sar1 to 0.
+model2_coef_change$aic
+model2_coef_change$coef
+cat("\nT-ratios:",round(model2_coef_change$coef/sqrt(diag(model2_coef_change$var.coef)),2))
+cat("\nSignificant?:",abs(model2_coef_change$coef/sqrt(diag(model2_coef_change$var.coef)))>2)
+
+model2 = model2_coef_change
+```
+
+Improved AIC.
+
+Nothing improves the AIC while keeping the model simple anymore. 
+```{r}
+# # model2_coef_change<-arima(lnserie, order = c(3,1,3), seasonal = list(order=c(0,1,1), period=52))
+# model2_coef_change$aic
+# model2_coef_change$coef
+# 
+# cat("\nT-ratios:",round(model2_coef_change$coef/sqrt(diag(model2_coef_change$var.coef)),2))
+# cat("\nSignificant?:",abs(model2_coef_change$coef/sqrt(diag(model2_coef_change$var.coef)))>2)
+# 
+# model2 = model2_coef_change
+```
+
+All the modules of the roots are greater than 1, for which the model is causal and invertible.
+```{r}
+cat("\nModul of AR Characteristic polynomial Roots: ", 
+    Mod(polyroot(c(1,-model2_coef_change$model$phi))),"\n")
+cat("\nModul of MA Characteristic polynomial Roots: ",
+    Mod(polyroot(c(1,model2_coef_change$model$theta))),"\n")
+```
+
+## 3. Validation
+
+### a) Perform the complete analysis of residuals, justifying all assumptions made.Usethe corresponding tests and graphical results.
+
+```{r}
+#################Validation#################################
+validation=function(model){
+  s=frequency(get(model$series))
+  resid=model$residuals
+  par(mfrow=c(2,2),mar=c(3,3,3,3))
+  #Residuals plot
+  plot(resid,main="Residuals")
+  abline(h=0)
+  abline(h=c(-3*sd(resid),3*sd(resid)),lty=3,col=4)
+  #Square Root of absolute values of residuals (Homocedasticity)
+  scatter.smooth(sqrt(abs(resid)),main="Square Root of Absolute residuals",
+                 lpars=list(col=2))
+  
+  #Normal plot of residuals
+  qqnorm(resid)
+  qqline(resid,col=2,lwd=2)
+  
+  ##Histogram of residuals with normal curve
+  hist(resid,breaks=20,freq=FALSE)
+  curve(dnorm(x,mean=mean(resid),sd=sd(resid)),col=2,add=T)
+  
+  
+  #ACF & PACF of residuals
+  par(mfrow=c(1,2))
+  acf(resid,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=1)
+  pacf(resid,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=1)
+  par(mfrow=c(1,1))
+  
+  #Ljung-Box p-values
+  par(mar=c(2,2,1,1))
+  tsdiag(model,gof.lag=7*s)
+  cat("\n--------------------------------------------------------------------\n")
+  print(model)
+  
+  #Stationary and Invertible
+  cat("\nModul of AR Characteristic polynomial Roots: ", 
+      Mod(polyroot(c(1,-model$model$phi))),"\n")
+  cat("\nModul of MA Characteristic polynomial Roots: ",
+      Mod(polyroot(c(1,model$model$theta))),"\n")
+  
+  suppressMessages(require(forecast,quietly=TRUE,warn.conflicts=FALSE))
+  plot(model)
+  
+  #Model expressed as an MA infinity (psi-weights)
+  psis=ARMAtoMA(ar=model$model$phi,ma=model$model$theta,lag.max=36)
+  names(psis)=paste("psi",1:36)
+  cat("\nPsi-weights (MA(inf))\n")
+  cat("\n--------------------\n")
+  print(psis[1:24])
+  
+  #Model expressed as an AR infinity (pi-weights)
+  pis=-ARMAtoMA(ar=-model$model$theta,ma=-model$model$phi,lag.max=36)
+  names(pis)=paste("pi",1:36)
+  cat("\nPi-weights (AR(inf))\n")
+  cat("\n--------------------\n")
+  print(pis[1:24])
+   
+  cat("\nDescriptive Statistics for the Residuals\n")
+  cat("\n----------------------------------------\n") 
+  
+  suppressMessages(require(fBasics,quietly=TRUE,warn.conflicts=FALSE))
+  ##Anderson-Darling test
+  print(basicStats(resid))
+  
+  ## Add here complementary tests (use with caution!)
+  ##---------------------------------------------------------
+  cat("\nNormality Tests\n")
+  cat("\n--------------------\n")
+ 
+  ##Shapiro-Wilks Normality test
+  print(shapiro.test(resid))
+
+  suppressMessages(require(nortest,quietly=TRUE,warn.conflicts=FALSE))
+  ##Anderson-Darling test
+  print(ad.test(resid))
+  
+  suppressMessages(require(tseries,quietly=TRUE,warn.conflicts=FALSE))
+  ##Jarque-Bera test
+  print(jarque.bera.test(resid))
+  
+  cat("\nHomoscedasticity Test\n")
+  cat("\n--------------------\n")
+  suppressMessages(require(lmtest,quietly=TRUE,warn.conflicts=FALSE))
+  ##Breusch-Pagan test
+  obs=get(model$series)
+  print(bptest(resid~I(obs-resid)))
+  
+  cat("\nIndependence Tests\n")
+  cat("\n--------------------\n")
+  
+  ##Durbin-Watson test
+  print(dwtest(resid~I(1:length(resid))))
+  
+  ##Ljung-Box test
+  cat("\nLjung-Box test\n")
+  print(t(apply(matrix(c(1:4,(1:4)*s)),1,function(el) {
+    te=Box.test(resid,type="Ljung-Box",lag=el)
+    c(lag=(te$parameter),statistic=te$statistic[[1]],p.value=te$p.value)})))
+  
+}
+################# Fi Validation #################################
+```
+
+```{r}
+validation(model)
+```
+
+Residual Analysis: Generally quite good but outliers are present. 
+QQ-plot: heavy-ish tails and outlier. A bit more values in the extremes than expected for normal distribution or outlier(s)?
+
+For the second model:
+```{r}
+validation(model2)
+```
+
+Residual Analysis:
+
+Residuals seem to have the mean around 0, but some outliers can be identified. Its variance slightly deviates from homogeneity. All statistical tests fail, which might be explain by the presence of outliers.
+
+Some lags are over the confidence bands in the P(ACF) plots, but the Durbin-Watson clearly shows there is no autocorrelation.
+
+The Ljung-Box test fails after lag 51, which is confirmed by the plot and tabulated results. This means that when considered jointly the correlation structure up to lag k=51 is compatible with a WNoise, but fails afterwards.
+
+Invertible and Causal:
+
+The proposed model is found both invertible and causal. 
+
+Invertible: the roots of the regular MA-characteristic polynomial lies outside the unit circle. Thus, the model can be represented as a convergent AR(∞) expression with π-weights (useful for estimating point predictions).
+
+Causal/stationary: the roots of the seasonal AR-characteristic polynomial lie outside the unit circle. Thus, the model can be represented as a convergent MA(∞) expression with ψ-weights(useful for estimating the variance of estimated point predictions).
+
+Sample and theoretical P(ACF) look alike.
+
+## c) Check the stability of the proposed models and evaluate their capability of prediction, reserving the last 12 observations
+
+For the first model:
+```{r}
+par(mfrow=c(1,1))
+ultim=time(lnserie)[(length(time(serie))-12)]
+max_time=time(lnserie)[length(time(serie))]
+
+serie2=window(serie,end=ultim)
+lnserie2=log(serie2+1)
+serie1=window(serie,end=max_time) # adds one year
+lnserie1=log(serie1+1)
+
+(modA=arima(lnserie1, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,0,NA,NA,NA,0,0,NA))) # whole time series
+(modB=arima(lnserie2, order = c(10,1,0), seasonal = list(order=c(0,1,4), period=52), fixed=c(NA,NA,NA,NA,NA,0,0,0,NA,NA,NA,0,0,NA))) # model without last observations
+
+pred=predict(modB,n.ahead=12)
+pr<-ts(c(tail(lnserie2,1),pred$pred),start=ultim,freq=52) # point prediction
+se<-ts(c(0,pred$se),start=ultim,freq=52) # standard error
+ts.plot(pr)
+
+tl<-ts(exp(pr-1.96*se)-1,start=ultim,freq=52)
+tu<-ts(exp(pr+1.96*se)-1,start=ultim,freq=52)
+pr<-ts(exp(pr)-1,start=ultim,freq=52)
+ts.plot(serie,tl,tu, pr,lty=c(1,2,2,1),col=c(1,4,4,2),type="o", xlim=c(2017, 2020), ylim=c(0,50000))
+
+obs=window(serie,start=ultim)
+pr=window(pr,start=ultim)
+mod.RMSE1=sqrt(sum((obs-pr)^2)/12)
+mod.MAE1=sum(abs(obs-pr))/12
+mod.RMSPE1=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE1=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE1,"MAE"=mod.MAE1,"RMSPE"=mod.RMSPE1,"MAPE"=mod.MAPE1)
+
+mCI1=mean(tu-tl)
+
+cat("\nMean Length CI: ",mCI1)
+```
+
+For the second model:
+```{r}
+par(mfrow=c(1,1))
+ultim=time(lnserie)[(length(time(serie))-12)]
+max_time=time(lnserie)[length(time(serie))]
+
+serie2=window(serie,end=ultim)
+lnserie2=log(serie2+1)
+serie1=window(serie,end=max_time) # adds one year
+lnserie1=log(serie1+1)
+
+modA=arima(lnserie, order = c(2,1,1), seasonal = list(order=c(0,1,1), period=52))
+modB=arima(lnserie2, order = c(2,1,1), seasonal = list(order=c(0,1,1), period=52))
+
+pred=predict(modB,n.ahead=12)
+pr<-ts(c(tail(lnserie2,1),pred$pred),start=ultim,freq=52) # point prediction
+se<-ts(c(0,pred$se),start=ultim,freq=52) # standard error
+ts.plot(pr)
+
+tl<-ts(exp(pr-1.96*se)-1,start=ultim,freq=52)
+tu<-ts(exp(pr+1.96*se)-1,start=ultim,freq=52)
+pr<-ts(exp(pr)-1,start=ultim,freq=52)
+ts.plot(serie,tl,tu, pr,lty=c(1,2,2,1),col=c(1,4,4,2),type="o", xlim=c(2019, 2020), ylim=c(0,50000))
+ts.plot(log(serie),log(tl),log(tu), log(pr),lty=c(1,2,2,1),col=c(1,4,4,2),type="o", xlim=c(2019, 2020), ylim=c(0,12))
+
+obs=window(serie,start=ultim)
+mod.RMSE1=sqrt(sum((obs-pr)^2)/12)
+mod.MAE1=sum(abs(obs-pr))/12
+mod.RMSPE1=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE1=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE1,"MAE"=mod.MAE1,"RMSPE"=mod.RMSPE1,"MAPE"=mod.MAPE1)
+
+mCI1=mean(tu-tl)
+
+cat("\nMean Length CI: ", mCI1)
+```
+
+### d) Select the best model for forecasting.
+
+Need to first first model as well to check. Look at the RMSE, etc.
+
+## 4. Predictions
+
+### a) Obtain long term forecasts for the twelve months following the last observation available; provide also confidence intervals.
+
+The long term predictions look as depicted below. Sadly, covid struck during this long term forecast, for which reality looks quite deviated from the forecast, as shown by the red line. Less influenca cases were recorded since most cases were directly diagnosed as being covid to not saturate hospitals.
+
+```{r}
+par(mfrow=c(1,1))
+predicted=forecast(model2, 52)
+plot(predicted, xlim=c(2010,2021), xlab='Years')
+
+covid = log(ts(flu.usa$INF_ALL, start=1998, frequency=52) + 1)
+
+lines(window(covid, start=2020), col='red')
+```
+
+## 5. Outlier Treatment
+
+### a) First, analyze whether the Calendar Effects are significant.
+
+No need since it has not been covered in class.
+
+### b) For the last selected model, apply the automatic detection of outliers and its treatment. Try to give the interpretation of detected outliers
+
+```{r}
+source("atipics2.r")
+
+##Detection of outliers: In this case, we have applied a regular and a seasonal differentiation of order $S=12$. We set the criterion to $crit = 2.8$ and also the argument LS to TRUE.
+## The crit value chosen by the researcher is typically fixed around 3; the LS argument is optional (= TRUE if one aims to detect a level shift)
+
+mod.atip=outdetec(model2,dif=c(1,52), crit=2.85, LS=T) # automatic detection of outliers with crit=2.8 and LS =TRUE
+
+#Estimated residual variance after outliers detection and treatment
+mod.atip$sigma
+```
+
+```{r}
+atipics=mod.atip$atip[order(mod.atip$atip[,1]),]
+
+weeks = c()
+for (w in seq(1, 52)) {
+  week = sprintf("%02d", w)
+  weeks = append(weeks, week)
+}
+
+df = data.frame(atipics,Fecha=paste(weeks[(atipics[,1]-1)%%52+1],start(lnserie)[1]+((atipics[,1]-1)%/%52)),perc.Obs=exp(atipics[,3])*100) 
+df[df['type_detected'] == "LS",]
+```
+
+```{r}
+lnserie.lin=lineal(lnserie, mod.atip$atip)
+serie.lin=exp(lnserie.lin)
+
+plot(serie.lin,col=2)
+lines(serie)
+```
+
+```{r}
+plot(lnserie-lnserie.lin)
+```
+
+The outliers ...
+
+### c) Once the series has been linearized, free of calendar and outliers’ effects, perform forecasting. Compare forecasts results for the original series: classical ARIMA vs ARIMA extension (by using the linearized models)
+
+```{r}
+d1d12lnserie.lin=diff(diff(lnserie.lin,52))
+par(mfrow=c(1,2))
+acf(d1d12lnserie.lin,ylim=c(-1,1),lag.max=72,col=c(2,rep(1,51)),lwd=2)
+pacf(d1d12lnserie.lin,ylim=c(-1,1),lag.max=72,col=c(rep(1,51),2),lwd=2)
+```
+
+```{r}
+par(mfrow=c(1,1))
+```
+
+Try for any value, 211011 is the one with best AIC and significant params.
+```{r}
+(mod.lin=arima(lnserie.lin,order=c(2,1,1),seasonal=list(order=c(0,1,1),period=52)))
+# cat("\nT-ratios:",round(mod.lin$coef/sqrt(diag(mod.lin$var.coef)),2))
+```
+
+```{r}
+dades=d1d12lnserie.lin  #stationary
+model=mod.lin  #Fitted ARIMA model to the log-linearized series
+validation(model,dades)
+```
+
+```{r}
+ultim=time(serie.lin)[(length(time(serie))-12)]
+max_time=time(serie.lin)[length(time(serie.lin))]
+pdq=c(2,1,1)
+PDQ=c(0,1,1)
+
+serie1.lin=window(serie.lin,end=max_time)
+lnserie1.lin=log(serie1.lin)
+serie2.lin=window(serie.lin,end=ultim)
+lnserie2.lin=log(serie2.lin)
+
+(mod.lin=arima(lnserie1.lin,order=pdq,seasonal=list(order=PDQ,period=52)))
+(mod2.lin=arima(lnserie2.lin,order=pdq,seasonal=list(order=PDQ,period=52)))
+```
+
+```{r}
+######### Out of sample prediction: reserve 2019 data
+
+pred=predict(mod2.lin,n.ahead=12)
+wLS=sum(mod.atip$atip[mod.atip$atip$type_detected=="LS" & mod.atip$atip$Obs<=length(serie)-12,3])
+predic=pred$pr+wLS
+pr<-ts(c(tail(lnserie2,1),predic),start=ultim,freq=52) #puntual predictions (log-scale) obtained
+se<-ts(c(0,pred$se),start=ultim,freq=52) #Standard errors for puntual predictions
+
+##Prediction Intervals (back transformed to original scale using exp-function)
+tl<-ts(exp(pr-1.96*se),start=ultim,freq=52)
+tu<-ts(exp(pr+1.96*se),start=ultim,freq=52)
+pr<-ts(exp(pr)-1,start=ultim,freq=52)
+
+#Plot of the original airbcn series (thousands) and out-of-sample predictions
+ts.plot(serie,tl,tu,pr,lty=c(1,2,2,1),col=c(1,4,4,2),type="o", xlim=c(2019, 2020), ylim=c(0,50000))
+ts.plot(log(serie),log(tl),log(tu),log(pr),lty=c(1,2,2,1),col=c(1,4,4,2),type="o", xlim=c(2019, 2020), ylim=c(0,12))
+# abline(v=(ultim[1]-3):(ultim[1]+2),lty=3,col=4)
+```
+
+```{r}
+(previs.lin=window(cbind(tl,pr,tu,serie,error=round(serie-pr,3)),start=ultim))
+```
+
+```{r}
+obs=window(serie,start=ultim) 
+mod.RMSE2=sqrt(sum((obs-pr)^2)/12)
+mod.MAE2=sum(abs(obs-pr))/12
+mod.RMSPE2=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE2=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE2,"MAE"=mod.MAE2,"RMSPE"=mod.RMSPE2,"MAPE"=mod.MAPE2)
+```
+
+```{r}
+mCI2=mean(tu-tl)
+
+cat("\nMean Length CI: ",mCI2)
+```
+
+
+
+
 
