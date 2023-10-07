@@ -2,7 +2,9 @@
 
 This repository is dedicated to a comprehensive time-series analysis of influenza trends within the United States. 
 
-![Forecast](images/forecast.png)
+<div align="center">
+  <img src="images/forecast.png" alt="Forecast" width="60%"/>
+</div>
 
 The framework adopted is a multifaceted approach that consists of the following key components:
 
