@@ -16,4 +16,4 @@ The framework adopted is a multifaceted approach that consists of the following 
 
 5. **Outlier Management**: Identification and treatment of anomalous data points that may skew the analysis, thereby ensuring the integrity and accuracy of the study.
 
-6. **Report Generation**: A comprehensive report is encapsulated in 'report.pdf', which provides in-depth insights, visualizations, and the statistical rationale behind the model’s configuration and performance.
+6. **Report Generation**: A comprehensive report is encapsulated in the [report](reports/report.pdf), which provides in-depth insights, visualizations, and the statistical rationale behind the model’s configuration and performance.
